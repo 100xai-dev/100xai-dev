@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://100xai.local/schemas/brand-dna.schema.json",
+  "title": "BrandDNA",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "brand_name",
+    "website",
+    "industry",
+    "one_liner",
+    "target_audience",
+    "tone_rules",
+    "banned_phrases",
+    "allowed_topics",
+    "disallowed_topics",
+    "unique_angle",
+    "proof_points",
+    "cta_library",
+    "visual_direction",
+    "image_hints",
+    "compliance_keywords",
+    "messaging_guardrails"
+  ],
+  "properties": {
+    "brand_name": { "type": "string" },
+    "website": { "type": "string", "format": "uri" },
+    "industry": { "type": "string" },
+    "one_liner": { "type": "string" },
+    "target_audience": { "type": "array", "items": { "type": "string" } },
+    "tone_rules": { "type": "array", "items": { "type": "string" } },
+    "banned_phrases": { "type": "array", "items": { "type": "string" } },
+    "allowed_topics": { "type": "array", "items": { "type": "string" } },
+    "disallowed_topics": { "type": "array", "items": { "type": "string" } },
+    "unique_angle": { "type": "string" },
+    "proof_points": { "type": "array", "items": { "type": "string" } },
+    "cta_library": { "type": "array", "items": { "type": "string" } },
+    "visual_direction": { "type": "string" },
+    "image_hints": { "type": "array", "items": { "type": "string" } },
+    "compliance_keywords": { "type": "array", "items": { "type": "string" } },
+    "messaging_guardrails": { "type": "array", "items": { "type": "string" } }
+  }
+}

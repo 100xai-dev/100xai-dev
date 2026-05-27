@@ -1,0 +1,9 @@
+[project]
+name = "ai-brand-os-worker"
+version = "0.1.0"
+description = "Background worker for 100xAI jobs."
+requires-python = ">=3.12"
+dependencies = [
+  "redis>=5.0.0"
+]
+
