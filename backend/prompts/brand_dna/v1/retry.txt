@@ -1,0 +1,20 @@
+Your previous response did not validate against the schema.
+
+Validation errors:
+{% for error in validation_errors %}
+- {{ error }}
+{% endfor %}
+
+Previous response:
+{{ previous_response }}
+
+Return a corrected JSON object only.
+
+Website URL: {{ website_url }}
+
+{% for section in sections %}
+--- {{ section.label }} ---
+{{ section.content }}
+
+{% endfor %}
+

@@ -4,35 +4,47 @@ AI marketing platform for onboarding brands, generating persistent Brand DNA, pr
 
 ## Current Status
 
-The base repo skeleton has been created. This is not a finished product yet; it is the foundation for the first implementation slice.
+The onboarding foundation is partially implemented. This is not the full product yet; it covers the first backend slice from `ONBOARDING_SUBSTEM.md` plus structural alignment with `AGENTS.md`.
 
 Completed so far:
 
-- Monorepo structure for frontend, backend, worker, shared schemas, prompts, docs, and infra.
-- FastAPI backend skeleton with health and readiness routes.
-- Placeholder brand creation API contract.
-- Async job state enums for future crawl, blog, approval, publish, LinkedIn, and WhatsApp workflows.
-- CMS publishing adapter contract so WordPress, Shopify, Webflow, and custom CMS connectors can share one interface.
-- Redis worker package skeleton.
-- Next.js frontend skeleton with a simple product module overview page.
-- Shared Brand DNA JSON schema.
-- Prompt ownership folders for Brand DNA, blogs, LinkedIn, WhatsApp, and images.
+- Authoritative `backend/`, `worker/`, and `frontend/` structure from `AGENTS.md`.
+- FastAPI backend with health/readiness routes.
+- JWT bearer-token dependency and role checks.
+- SQLAlchemy models for organizations, users, brands, profiles, knowledge sources/chunks, integrations, jobs, and audit logs.
+- Alembic migration for the onboarding subsystem.
+- Brand creation API for crawl/manual paths.
+- Tenant-scoped brand listing and brand summary.
+- Manual Brand DNA profile submission.
+- Profile patching only during `PENDING_REVIEW`.
+- Admin-only approval that locks the profile and marks the brand `READY`.
+- Job status endpoint.
+- WordPress integration provider boundary plus Shopify/Webflow/custom stubs.
+- Fernet credential encryption service.
+- RQ worker entrypoint and stable task import targets.
+- Next.js admin route skeleton for brand list and brand creation.
+- Shared Brand DNA JSON schema and backend schema file.
+- Prompt ownership folders plus backend Brand DNA v1 prompts.
 - Docker Compose services for local Postgres and Redis.
 - Architecture docs for repo structure and domain boundaries.
 - Dev helper scripts for the API and worker.
 
 Verified so far:
 
-- Python source compiles with `python -m compileall apps/api/src apps/worker/src`.
+- Backend tests pass with `PYTHONPATH=backend python -m pytest -p no:rerunfailures backend/tests -q`.
 - JSON files validate with `python -m json.tool`.
 
 Not done yet:
 
 - Dependency installation.
-- Real database models and migrations.
-- Authentication.
-- Persistent brand creation.
-- Crawl job queueing.
+- Real login endpoint and password hashing.
+- Redis enqueue wiring for crawl jobs.
+- Crawler implementation.
+- LLM extraction worker.
+- Pinecone ingestion worker.
+- Source upload/presigned URL endpoint.
+- WordPress integration API route.
+- Full admin panel forms and polling.
 - Pinecone integration.
 - Provider API integrations.
 - Blog generation pipeline.
@@ -41,10 +53,9 @@ Not done yet:
 ## Repo Layout
 
 ```text
-apps/
-  web/        Next.js frontend
-  api/        FastAPI backend and domain services
-  worker/     async worker entrypoints
+backend/     FastAPI backend, models, schemas, routers, services, migrations
+worker/      RQ worker entrypoints and onboarding task targets
+frontend/    Next.js admin panel
 packages/
   prompts/    versioned prompt contracts owned by content/prompt team
   shared-schemas/
@@ -131,22 +142,24 @@ pnpm --filter web dev
 
 Next implementation target:
 
-1. Add real SQLAlchemy models for users, organizations, brands, brand profiles, knowledge sources, jobs, and audit logs.
-2. Add Alembic migrations.
-3. Implement `POST /v1/brands` with database persistence.
-4. Create a crawl job when a brand is submitted.
-5. Add onboarding UI for brand name, website URL, industry, notes, and upload placeholder.
-6. Prepare the Brand DNA generation boundary using `packages/shared-schemas/brand-dna/schema.json`.
+1. Wire Redis/RQ enqueueing for `brand.onboard` and `brand.ingest`.
+2. Implement crawler URL discovery, extraction, and source persistence.
+3. Implement OpenRouter extraction with schema validation and retry.
+4. Implement Pinecone ingestion and chunk reconciliation.
+5. Add source upload/presigned URL and WordPress integration endpoints.
+6. Expand the frontend admin panel beyond the current route skeleton.
 
 ## Important Files
 
-- `apps/api/src/ai_brand_os/main.py`: FastAPI app factory.
-- `apps/api/src/ai_brand_os/api/v1.py`: current v1 API routes.
-- `apps/api/src/ai_brand_os/jobs/states.py`: shared job state enums.
-- `apps/api/src/ai_brand_os/integrations/publishing.py`: CMS publish adapter contract.
-- `apps/web/src/app/page.tsx`: current frontend entry page.
-- `apps/worker/src/ai_brand_os_worker/main.py`: worker entrypoint placeholder.
+- `backend/app/main.py`: FastAPI app.
+- `backend/app/routers/brands.py`: onboarding brand/profile endpoints.
+- `backend/app/models/`: SQLAlchemy onboarding models.
+- `backend/app/services/brand_service.py`: onboarding business rules.
+- `backend/app/integrations/`: provider interfaces and WordPress/stub adapters.
+- `worker/main.py`: RQ worker entrypoint.
+- `frontend/app/brands/new/page.tsx`: current brand creation page.
 - `packages/shared-schemas/brand-dna/schema.json`: Brand DNA contract.
 - `packages/prompts/`: prompt files owned by the prompt/content workflow.
+- `backend/prompts/brand_dna/v1/`: backend-loaded Brand DNA prompt version.
 - `docs/architecture/domain-boundaries.md`: domain boundary reference.
 - `docs/architecture/repo-architecture.md`: repo architecture reference.

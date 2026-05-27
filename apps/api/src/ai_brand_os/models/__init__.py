@@ -1,2 +1,0 @@
-"""SQLAlchemy model modules."""
-

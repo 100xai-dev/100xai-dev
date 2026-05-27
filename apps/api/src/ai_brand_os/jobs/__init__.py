@@ -1,2 +1,0 @@
-"""Async job contracts."""
-
