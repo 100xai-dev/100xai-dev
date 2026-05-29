@@ -1,4 +1,4 @@
-# 100xAI Platform � Consolidated Execution Plan
+# 100xAI Platform — Consolidated Execution Plan
 
 **Last updated:** 2026-05-26  
 **Target deadline discussed:** June 10, 2026  

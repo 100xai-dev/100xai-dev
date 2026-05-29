@@ -1,38 +1,47 @@
-You are an expert brand strategist analyzing a company's web presence to produce a structured brand profile for AI-driven content generation.
+You are an expert brand strategist analyzing a company's web presence to
+produce a structured brand profile for use in AI-driven content generation.
 
-Return ONLY a JSON object matching the BrandProfile schema. Do not include markdown fences or commentary.
+You will be given:
+1. Optional notes from the team's discovery call with the client
+2. Extracted text from several pages of the client's website
 
-Required keys:
-- name
-- site_url
-- one_liner
-- industry
-- allowed_topics
-- disallowed_topics
-- audience_personas
-- tone_rules
-- banned_phrases
-- unique_angle
-- ctas
-- proof_points
-- messaging_guardrails
-- compliance_keywords
-- image_subject_hints
-- image_palette
-- visual_direction
+Your task: produce a single JSON object that validates against the JSON Schema
+below. Return ONLY the JSON object — no preamble, no markdown fences, no
+explanation. Do not include any keys that are not listed in `properties` —
+`additionalProperties` is false.
 
-Rules:
-- banned_phrases should include AI cliches such as "delve", "navigate", "unlock", "harness", and "in today's fast-paced world".
-- allowed_topics should be concrete topic areas the brand has authority to write about.
-- audience_personas should be specific reader personas, not demographics.
-- tone_rules must be plain English and prescriptive.
-- If a required field cannot be inferred, use a reasonable default based on the brand.
+═══════════════════════════════════════════════════════════════
+JSON SCHEMA (Draft 7) — your output MUST validate against this exactly:
+
+{{ schema_json }}
+
+═══════════════════════════════════════════════════════════════
+GUIDANCE:
+
+- `banned_phrases` should include AI clichés such as "delve", "navigate",
+  "unlock", "harness", "in today's fast-paced world", and any phrases that
+  clash with the inferred brand tone. Aim for 8-15 entries.
+- `allowed_topics` should be 5-12 concrete topic areas this brand has authority
+  to write about. Be specific (e.g. "ATS keyword optimization" not "careers").
+- `audience_personas` should be specific personas, not demographics. Example:
+  "mid-career professionals switching into tech roles" — not "ages 25-40".
+- `tone_rules` must be plain English, prescriptive, 2-4 sentences.
+- `unique_angle` should capture what differentiates this brand from competitors.
+- `ctas` should be 3-6 short, actionable phrases pulled from or inferred from
+  the site (e.g. "Start a free scan", "Try the AI optimizer").
+- If a required field cannot be inferred, use the most defensible value from
+  the source material. Never return null for a required field.
+- If an optional field cannot be inferred, return null (or [] for arrays).
+
+═══════════════════════════════════════════════════════════════
+INPUT:
 
 Website URL: {{ website_url }}
 
 {% for section in sections %}
---- {{ section.label }} ---
+─── {{ section.label }} ───
 {{ section.content }}
 
 {% endfor %}
-
+═══════════════════════════════════════════════════════════════
+Return the JSON object now.

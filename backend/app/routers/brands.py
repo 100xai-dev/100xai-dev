@@ -1,20 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth.rbac import require_role
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user
-from app.models import BrandProfile, IntegrationAccount
-from app.repositories.brands import get_active_job, get_brand, list_brands
+from app.models import Brand, BrandProfile
+from app.repositories.brands import get_brand
 from app.schemas.brand import (
     ApproveBrandResponse,
     BrandCreate,
     BrandCreateResponse,
+    DeleteBrandResponse,
     BrandListResponse,
     BrandSummary,
 )
 from app.schemas.brand_profile import BrandProfileContent, BrandProfileFull, BrandProfilePatch
-from app.services.brand_service import approve_brand, create_brand, patch_profile, submit_manual_profile
+from app.services.brand_service import approve_brand, create_brand, patch_profile, request_delete, submit_manual_profile
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -41,9 +43,7 @@ def list_brands_endpoint(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> BrandListResponse:
     require_role(current_user.role, {"admin", "team_member", "viewer"})
-    return BrandListResponse(
-        items=[_brand_summary(db, brand.id, current_user.org_id) for brand in list_brands(db, current_user.org_id)]
-    )
+    return BrandListResponse(items=_list_brand_summaries(db, current_user.org_id))
 
 
 @router.get("/{brand_id}", response_model=BrandSummary)
@@ -59,19 +59,15 @@ def get_brand_endpoint(
     return _brand_summary(db, brand.id, current_user.org_id)
 
 
-@router.delete("/{brand_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{brand_id}", response_model=DeleteBrandResponse, status_code=status.HTTP_202_ACCEPTED)
 def delete_brand_endpoint(
     brand_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
-) -> Response:
+) -> DeleteBrandResponse:
     require_role(current_user.role, {"admin"})
-    brand = get_brand(db, brand_id, current_user.org_id)
-    if not brand:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resource not found")
-    db.delete(brand)
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    job = request_delete(db, brand_id, current_user)
+    return DeleteBrandResponse(job_id=job.id)
 
 
 @router.post("/{brand_id}/profile", response_model=BrandProfileFull, status_code=status.HTTP_201_CREATED)
@@ -127,14 +123,19 @@ def approve_brand_endpoint(
     )
 
 
-def _brand_summary(db: Session, brand_id: str, org_id: str) -> BrandSummary:
-    brand = get_brand(db, brand_id, org_id)
-    if not brand:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resource not found")
-    active_job = get_active_job(db, brand.id)
-    integrations = db.query(IntegrationAccount).filter(IntegrationAccount.brand_id == brand.id).all()
-    readiness = {"wordpress": None, "shopify": None, "webflow": None, "custom_api": None}
-    for integration in integrations:
+_ACTIVE_JOB_STATUSES = ("QUEUED", "NEW", "RUNNING")
+_CHANNELS = ("wordpress", "shopify", "webflow", "custom_api")
+
+
+def _build_summary(brand: Brand) -> BrandSummary:
+    active_jobs = sorted(
+        (j for j in brand.jobs if j.status in _ACTIVE_JOB_STATUSES),
+        key=lambda j: j.created_at,
+        reverse=True,
+    )
+    active_job = active_jobs[0] if active_jobs else None
+    readiness: dict[str, str | None] = {c: None for c in _CHANNELS}
+    for integration in brand.integration_accounts:
         if integration.provider in readiness:
             readiness[integration.provider] = integration.status
     return BrandSummary(
@@ -159,6 +160,28 @@ def _brand_summary(db: Session, brand_id: str, org_id: str) -> BrandSummary:
             else None
         ),
     )
+
+
+def _list_brand_summaries(db: Session, org_id: str) -> list[BrandSummary]:
+    stmt = (
+        select(Brand)
+        .where(Brand.org_id == org_id)
+        .options(selectinload(Brand.jobs), selectinload(Brand.integration_accounts))
+        .order_by(Brand.created_at.desc())
+    )
+    return [_build_summary(b) for b in db.execute(stmt).scalars().all()]
+
+
+def _brand_summary(db: Session, brand_id: str, org_id: str) -> BrandSummary:
+    stmt = (
+        select(Brand)
+        .where(Brand.id == brand_id, Brand.org_id == org_id)
+        .options(selectinload(Brand.jobs), selectinload(Brand.integration_accounts))
+    )
+    brand = db.execute(stmt).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resource not found")
+    return _build_summary(brand)
 
 
 def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
@@ -198,4 +221,3 @@ def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
-

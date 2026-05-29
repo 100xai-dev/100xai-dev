@@ -18,6 +18,7 @@ class BrandStatus(StrEnum):
     PENDING_REVIEW = "PENDING_REVIEW"
     READY = "READY"
     FAILED = "FAILED"
+    PENDING_DELETE = "PENDING_DELETE"
 
 
 class BrandCreate(BaseModel):
@@ -72,3 +73,6 @@ class ApproveBrandResponse(BaseModel):
     locked_at: datetime
     locked_by: str
 
+
+class DeleteBrandResponse(BaseModel):
+    job_id: str

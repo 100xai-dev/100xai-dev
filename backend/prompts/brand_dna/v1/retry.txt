@@ -5,16 +5,20 @@ Validation errors:
 - {{ error }}
 {% endfor %}
 
-Previous response:
+Your previous response:
 {{ previous_response }}
 
-Return a corrected JSON object only.
+═══════════════════════════════════════════════════════════════
+
+Read the errors carefully. Produce a corrected JSON object matching the
+schema exactly. Return ONLY the JSON — no commentary, no markdown.
+
+Same input applies:
 
 Website URL: {{ website_url }}
 
 {% for section in sections %}
---- {{ section.label }} ---
+─── {{ section.label }} ───
 {{ section.content }}
 
 {% endfor %}
-

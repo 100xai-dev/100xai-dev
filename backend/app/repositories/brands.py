@@ -14,8 +14,7 @@ def list_brands(db: Session, org_id: str) -> list[Brand]:
 def get_active_job(db: Session, brand_id: str) -> Job | None:
     return (
         db.query(Job)
-        .filter(Job.brand_id == brand_id, Job.status.in_(["NEW", "RUNNING"]))
+        .filter(Job.brand_id == brand_id, Job.status.in_(["QUEUED", "NEW", "RUNNING"]))
         .order_by(Job.created_at.desc())
         .first()
     )
-

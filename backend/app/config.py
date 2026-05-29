@@ -7,12 +7,15 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_url: str = "http://localhost:8000"
     log_level: str = "INFO"
-    database_url: str = "sqlite:///./dev.db"
+    database_url: str = "postgresql+psycopg://100xai:100xai@localhost:5432/100xai"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "dev-secret-change-me-at-least-32-chars"
     jwt_expiry_hours: int = 24
     token_encryption_key: str | None = None
     token_encryption_key_id: str = "v1"
+    # Optional JSON map of historical keys for rotation, e.g.
+    # TOKEN_ENCRYPTION_KEYRING='{"v1": "...", "v2": "..."}' with active = token_encryption_key_id.
+    token_encryption_keyring: str | None = None
     openrouter_api_key: str | None = None
     extraction_model: str = "anthropic/claude-3-5-sonnet"
     extraction_model_fallback: str = "openai/gpt-4o"
@@ -25,6 +28,7 @@ class Settings(BaseSettings):
     crawler_max_pages: int = 12
     crawler_page_timeout_sec: int = 20
     crawler_host_delay_sec: int = 1
+    apify_api_key: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -32,4 +36,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

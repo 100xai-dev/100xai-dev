@@ -7,6 +7,7 @@ from app.models import Brand, Job
 def test_create_crawl_brand_persists_brand_and_onboard_job(
     client: TestClient,
     db_session: Session,
+    fake_queues,
 ) -> None:
     from tests.conftest import auth_headers, create_user
 
@@ -35,7 +36,8 @@ def test_create_crawl_brand_persists_brand_and_onboard_job(
 
     job = db_session.query(Job).filter_by(id=body["job_id"]).one()
     assert job.job_type == "brand.onboard"
-    assert job.status == "NEW"
+    assert job.status == "QUEUED"
+    assert len(fake_queues["onboarding"].calls) == 1
 
 
 def test_create_manual_brand_does_not_create_onboard_job(
@@ -120,4 +122,3 @@ def test_approve_locks_pending_review_profile(client: TestClient, db_session: Se
         json={"one_liner": "This should not apply after lock."},
     )
     assert patch_response.status_code == 409
-

@@ -12,10 +12,9 @@ def main() -> None:
 
     redis_conn = redis.from_url(settings.redis_url)
     with Connection(redis_conn):
-        worker = Worker([Queue("onboarding"), Queue("default")])
+        worker = Worker([Queue("onboarding"), Queue("purge"), Queue("default")])
         worker.work()
 
 
 if __name__ == "__main__":
     main()
-

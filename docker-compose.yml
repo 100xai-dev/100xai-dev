@@ -1,4 +1,52 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://100xai:100xai@postgres:5432/100xai
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-at-least-32-chars}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-100xai-dev}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-100xai-dev-secret}
+      S3_BUCKET: ${S3_BUCKET:-100xai-uploads}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://100xai:100xai@postgres:5432/100xai
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-at-least-32-chars}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # rq info exits non-zero if it cannot reach Redis or the worker has no
+      # registered queues — meaningful liveness, unlike a bare `print`.
+      test: ["CMD-SHELL", "rq info -u \"$REDIS_URL\" --only-queues onboarding purge default >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -25,5 +73,23 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-100xai-dev}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-100xai-dev-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
+  minio_data:

@@ -1,30 +1,38 @@
+from sqlalchemy import Uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, uuid_str
+from app.models.base import Base, TimestampMixin, utcnow, uuid_str
 
 
 class Brand(Base, TimestampMixin):
     __tablename__ = "brands"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    org_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     website_url: Mapped[str | None] = mapped_column(String)
     dna_source: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="DRAFT")
     failure_reason: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id"), nullable=False)
+
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="brand", cascade="all, delete-orphan"
+    )
+    integration_accounts: Mapped[list["IntegrationAccount"]] = relationship(
+        back_populates="brand", cascade="all, delete-orphan"
+    )
 
 
 class BrandProfile(Base, TimestampMixin):
     __tablename__ = "brand_profiles"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
     brand_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("brands.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
@@ -59,15 +67,15 @@ class BrandProfile(Base, TimestampMixin):
     raw_extraction: Mapped[dict | None] = mapped_column(JSON)
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    locked_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    locked_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id"))
 
 
 class BrandKnowledgeSource(Base):
     __tablename__ = "brand_knowledge_sources"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
     brand_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("brands.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -79,18 +87,18 @@ class BrandKnowledgeSource(Base):
     normalized_text: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     word_count: Mapped[int | None] = mapped_column(Integer)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     purge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class BrandKnowledgeChunk(Base):
     __tablename__ = "brand_knowledge_chunks"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    brand_id: Mapped[str] = mapped_column(String(36), ForeignKey("brands.id", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    brand_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("brands.id", ondelete="CASCADE"))
     source_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("brand_knowledge_sources.id", ondelete="CASCADE"),
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -99,29 +107,31 @@ class BrandKnowledgeChunk(Base):
     vector_id: Mapped[str] = mapped_column(String, nullable=False)
     embedding_model: Mapped[str] = mapped_column(String, nullable=False)
     namespace: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class IntegrationAccount(Base, TimestampMixin):
     __tablename__ = "integration_accounts"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    brand_id: Mapped[str] = mapped_column(String(36), ForeignKey("brands.id", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    brand_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("brands.id", ondelete="CASCADE"))
     provider: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     display_label: Mapped[str | None] = mapped_column(String)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id"), nullable=False)
+
+    brand: Mapped[Brand] = relationship(back_populates="integration_accounts")
 
 
 class IntegrationToken(Base, TimestampMixin):
     __tablename__ = "integration_tokens"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
     integration_account_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("integration_accounts.id", ondelete="CASCADE"),
         unique=True,
     )
@@ -133,8 +143,9 @@ class IntegrationToken(Base, TimestampMixin):
 class Job(Base, TimestampMixin):
     __tablename__ = "jobs"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    brand_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("brands.id", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    org_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
+    brand_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey("brands.id", ondelete="CASCADE"))
     job_type: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="NEW")
     stage: Mapped[str | None] = mapped_column(String)
@@ -148,3 +159,4 @@ class Job(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    brand: Mapped[Brand | None] = relationship(back_populates="jobs")

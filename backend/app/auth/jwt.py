@@ -1,56 +1,44 @@
-import base64
-import hashlib
-import hmac
-import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import jwt as pyjwt
 
 from app.config import get_settings
 
+_ALGORITHM = "HS256"
+_ISSUER = "100xai"
 
-def _b64encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
-
-def _b64decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + padding)
+class TokenError(ValueError):
+    pass
 
 
 def create_access_token(user_id: str, org_id: str, role: str) -> str:
     settings = get_settings()
-    header = {"alg": "HS256", "typ": "JWT"}
+    now = datetime.now(timezone.utc)
     payload = {
+        "iss": _ISSUER,
         "sub": str(user_id),
         "org_id": str(org_id),
         "role": role,
-        "exp": int((datetime.utcnow() + timedelta(hours=settings.jwt_expiry_hours)).timestamp()),
+        "iat": int(now.timestamp()),
+        "nbf": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=settings.jwt_expiry_hours)).timestamp()),
     }
-    signing_input = ".".join(
-        [
-            _b64encode(json.dumps(header, separators=(",", ":")).encode()),
-            _b64encode(json.dumps(payload, separators=(",", ":")).encode()),
-        ]
-    )
-    signature = hmac.new(
-        settings.jwt_secret.encode(),
-        signing_input.encode(),
-        hashlib.sha256,
-    ).digest()
-    return f"{signing_input}.{_b64encode(signature)}"
+    return pyjwt.encode(payload, settings.jwt_secret, algorithm=_ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict:
     settings = get_settings()
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("invalid token")
-    signing_input = ".".join(parts[:2])
-    expected = hmac.new(settings.jwt_secret.encode(), signing_input.encode(), hashlib.sha256).digest()
-    actual = _b64decode(parts[2])
-    if not hmac.compare_digest(expected, actual):
-        raise ValueError("invalid signature")
-    payload = json.loads(_b64decode(parts[1]))
-    if int(payload["exp"]) < int(datetime.utcnow().timestamp()):
-        raise ValueError("token expired")
-    return payload
-
+    try:
+        return pyjwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[_ALGORITHM],
+            issuer=_ISSUER,
+            options={"require": ["exp", "iat", "sub", "org_id", "role", "iss"]},
+            leeway=timedelta(seconds=30),
+        )
+    except pyjwt.ExpiredSignatureError as exc:
+        raise TokenError("token expired") from exc
+    except pyjwt.InvalidTokenError as exc:
+        raise TokenError(f"invalid token: {exc}") from exc

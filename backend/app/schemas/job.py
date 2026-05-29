@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class JobRead(BaseModel):
     id: str
+    org_id: str | None
     brand_id: str | None
     job_type: str
     status: str
@@ -16,4 +17,3 @@ class JobRead(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     error_message: str | None
-

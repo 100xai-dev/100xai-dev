@@ -4,30 +4,28 @@ AI marketing platform for onboarding brands, generating persistent Brand DNA, pr
 
 ## Current Status
 
-The onboarding foundation is partially implemented. This is not the full product yet; it covers the first backend slice from `ONBOARDING_SUBSTEM.md` plus structural alignment with `AGENTS.md`.
+The onboarding foundation is partially implemented. This is not the full product yet; it covers the first backend slice from `ONBOARDING_FOUNDATION.md` plus structural alignment with `AGENTS.md`.
 
 Completed so far:
 
 - Authoritative `backend/`, `worker/`, and `frontend/` structure from `AGENTS.md`.
 - FastAPI backend with health/readiness routes.
-- JWT bearer-token dependency and role checks.
+- PyJWT-based bearer-token dependency with `alg`/`iss`/`exp` validation and role checks.
 - SQLAlchemy models for organizations, users, brands, profiles, knowledge sources/chunks, integrations, jobs, and audit logs.
-- Alembic migration for the onboarding subsystem.
-- Brand creation API for crawl/manual paths.
-- Tenant-scoped brand listing and brand summary.
-- Manual Brand DNA profile submission.
-- Profile patching only during `PENDING_REVIEW`.
+- Alembic migrations for the onboarding subsystem, pending-delete state, and tenancy + indexes.
+- Brand creation API for crawl/manual paths with Redis/RQ enqueue.
+- Tenant-scoped brand listing and brand summary (single joined query, no N+1).
+- Manual Brand DNA profile submission and PATCH editor that only sends dirty fields.
 - Admin-only approval that locks the profile and marks the brand `READY`.
-- Job status endpoint.
+- Job status endpoint with org-scoped tenancy filter.
+- Async crawler (`services/crawler.py`), LLM extractor with schema-validated retry, Pinecone ingestion.
+- Onboarding pipeline orchestrator (`services/onboarding_pipeline.py`) with idempotent re-crawl, single shared event loop, and RQ retry for recoverable errors.
 - WordPress integration provider boundary plus Shopify/Webflow/custom stubs.
-- Fernet credential encryption service.
-- RQ worker entrypoint and stable task import targets.
-- Next.js admin route skeleton for brand list and brand creation.
-- Shared Brand DNA JSON schema and backend schema file.
-- Prompt ownership folders plus backend Brand DNA v1 prompts.
-- Docker Compose services for local Postgres and Redis.
-- Architecture docs for repo structure and domain boundaries.
-- Dev helper scripts for the API and worker.
+- Fernet credential encryption service with multi-key keyring for rotation.
+- RQ worker entrypoint with shared engine and stable task import targets.
+- Next.js admin: brand list, create, detail, DNA review/editor, polling job status, manual profile form, hard-delete with audit trail. API token is server-only, proxied through `/api/*` route handler.
+- Shared Brand DNA JSON schema embedded into the extraction prompt at render time.
+- Docker Compose services for Postgres, Redis, and MinIO using real Dockerfiles under `infra/docker/`.
 
 Verified so far:
 
@@ -36,19 +34,12 @@ Verified so far:
 
 Not done yet:
 
-- Dependency installation.
 - Real login endpoint and password hashing.
-- Redis enqueue wiring for crawl jobs.
-- Crawler implementation.
-- LLM extraction worker.
-- Pinecone ingestion worker.
 - Source upload/presigned URL endpoint.
-- WordPress integration API route.
-- Full admin panel forms and polling.
-- Pinecone integration.
-- Provider API integrations.
 - Blog generation pipeline.
-- CMS publishing implementation.
+- LinkedIn / WhatsApp distribution.
+- CMS publishing for non-WordPress adapters.
+- Full operational dashboard and calendar views.
 
 ## Repo Layout
 
@@ -138,16 +129,14 @@ pnpm --filter web dev
 ./scripts/dev-worker.sh
 ```
 
-## First Engineering Slice
+## Next Engineering Slice
 
-Next implementation target:
-
-1. Wire Redis/RQ enqueueing for `brand.onboard` and `brand.ingest`.
-2. Implement crawler URL discovery, extraction, and source persistence.
-3. Implement OpenRouter extraction with schema validation and retry.
-4. Implement Pinecone ingestion and chunk reconciliation.
-5. Add source upload/presigned URL and WordPress integration endpoints.
-6. Expand the frontend admin panel beyond the current route skeleton.
+1. Real `/v1/auth/login` with password hashing and refresh.
+2. Source upload + presigned URL endpoint and S3/MinIO ingestion path.
+3. Blog brief → outline → section → article generation pipeline.
+4. CMS publishing adapters beyond WordPress (Shopify, Webflow, custom).
+5. LinkedIn (Unipile) and WhatsApp (VAPI) distribution.
+6. Operational dashboard and content calendar.
 
 ## Important Files
 
