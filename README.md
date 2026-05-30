@@ -106,28 +106,134 @@ Prompt/content owner owns files under `packages/prompts/`:
 
 Application code should load prompts from `packages/prompts/` instead of hard-coding prompt text.
 
-## Local Services
+## Running Locally (No Docker)
+
+### Prerequisites
+
+- Python 3.12
+- Node.js 18+
+- PostgreSQL (running locally)
+- Redis — `brew install redis && brew services start redis` (Mac)
+
+### 1. Clone and enter the repo
 
 ```bash
-cp .env.example .env
-docker compose up -d postgres redis
+git clone <repo-url>
+cd 100xai
 ```
 
-## Development Targets
-
-Install dependencies first once package management is finalized:
+### 2. Backend setup
 
 ```bash
-pnpm install
+cd backend
+python3.12 -m venv venv
+venv/bin/pip install -r requirements.txt
 ```
 
-Then run services:
+Create `backend/.env`:
+
+```env
+APP_ENV=development
+APP_URL=http://localhost:8000
+DATABASE_URL=postgresql+psycopg://<pg-user>:<pg-password>@localhost:5432/100xai
+REDIS_URL=redis://localhost:6379/0
+JWT_SECRET=any-random-string-at-least-32-chars
+JWT_EXPIRY_HOURS=24
+OPENROUTER_API_KEY=sk-or-...
+APIFY_API_KEY=apify_api_...
+EXTRACTION_MODEL=anthropic/claude-3-5-sonnet-20241022
+```
+
+Create the database and run migrations:
 
 ```bash
-pnpm --filter web dev
-./scripts/dev-api.sh
-./scripts/dev-worker.sh
+createdb 100xai
+venv/bin/alembic upgrade head
 ```
+
+Seed a dev org and user (one-time):
+
+```bash
+venv/bin/python -c "
+from app.db import SessionLocal
+from app.models.core import Organization, User
+db = SessionLocal()
+org_id = '00000000-0000-0000-0000-000000000001'
+user_id = '00000000-0000-0000-0000-000000000001'
+if not db.get(Organization, org_id):
+    db.add(Organization(id=org_id, name='Dev Org'))
+if not db.get(User, user_id):
+    db.add(User(id=user_id, org_id=org_id, email='dev@100xai.com', password_hash='dev', name='Dev Admin', role='admin'))
+db.commit()
+print('Seeded')
+db.close()
+"
+```
+
+Generate a dev API token:
+
+```bash
+venv/bin/python -c "
+from app.auth.jwt import create_access_token
+print(create_access_token(user_id='00000000-0000-0000-0000-000000000001', org_id='00000000-0000-0000-0000-000000000001', role='admin'))
+"
+```
+
+Start the backend (run from `backend/` directory):
+
+```bash
+venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+### 3. Frontend setup
+
+```bash
+cd frontend
+npm install
+```
+
+Create `frontend/.env.local`:
+
+```env
+BACKEND_URL=http://localhost:8000
+API_TOKEN=<token from step above>
+```
+
+Start the frontend:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+### 4. Worker setup (for crawl-path brand onboarding)
+
+Run from the repo root:
+
+```bash
+cd /path/to/100xai
+OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
+PYTHONPATH=backend:. \
+OPENROUTER_API_KEY=sk-or-... \
+APIFY_API_KEY=apify_api_... \
+DATABASE_URL=postgresql+psycopg://<pg-user>:<pg-password>@localhost:5432/100xai \
+REDIS_URL=redis://localhost:6379/0 \
+JWT_SECRET=any-random-string-at-least-32-chars \
+EXTRACTION_MODEL=anthropic/claude-3-5-sonnet-20241022 \
+backend/venv/bin/rq worker --with-scheduler onboarding purge default
+```
+
+> `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` is required on macOS only.
+
+### Required API Keys
+
+| Key | Purpose | Get it at |
+|---|---|---|
+| `OPENROUTER_API_KEY` | LLM brand DNA extraction | openrouter.ai |
+| `APIFY_API_KEY` | Website crawling | apify.com |
+
+Pinecone and OpenAI keys are optional — vector ingestion is skipped if not set.
 
 ## Next Engineering Slice
 
