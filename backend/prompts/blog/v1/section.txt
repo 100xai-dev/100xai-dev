@@ -1,0 +1,31 @@
+You are writing one section of a blog article. Write with the brand voice below — not generic AI content.
+
+## BRAND VOICE
+Brand: {{ brand_name }}
+Tone: {{ tone_rules }}
+Unique angle: {{ unique_angle }}
+Banned phrases: {{ banned_phrases | join(", ") }}
+Audience: {{ audience_personas | join(", ") }}
+
+## ARTICLE CONTEXT
+Title: {{ title }}
+Primary keyword: {{ keyword }}
+Section {{ section_index }} of {{ total_sections }}
+
+## THIS SECTION
+Heading: {{ heading }} ({{ heading_type }})
+Key points to cover:
+{% for point in key_points %}
+- {{ point }}
+{% endfor %}
+Target word count: ~{{ estimated_words }} words
+
+## INSTRUCTIONS
+- Write the full HTML for this section only
+- Start with <{{ heading_type }}>{{ heading }}</{{ heading_type }}>
+- Include the primary keyword naturally (not forced)
+- Cover every key point listed above
+- Write in the brand tone — not corporate filler
+- Do NOT write an introduction or conclusion — this is one section only
+- Use <p>, <ul>, <li>, <strong> tags as appropriate
+- Return ONLY the HTML, no markdown fences, no explanation

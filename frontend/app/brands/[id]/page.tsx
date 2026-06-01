@@ -24,6 +24,7 @@ const tabs = [
   { num: "05", label: "WordPress Engine Setup", href: (id: string) => `/brands/${id}/integrations/wordpress` },
   { num: "06", label: "Operational Params", href: (id: string) => `/brands/${id}/operational` },
   { num: "07", label: "Audit Trail", href: (id: string) => `/brands/${id}/audit` },
+  { num: "08", label: "Blog Engine", href: (id: string) => `/brands/${id}/blogs` },
 ];
 
 export default async function BrandDetailPage({ params }: PageProps) {

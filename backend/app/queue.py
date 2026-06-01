@@ -5,6 +5,7 @@ from app.config import get_settings
 
 ONBOARDING_QUEUE = "onboarding"
 PURGE_QUEUE = "purge"
+BLOG_QUEUE = "blog"
 
 
 @lru_cache(maxsize=1)

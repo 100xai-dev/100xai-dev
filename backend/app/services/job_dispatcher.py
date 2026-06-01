@@ -1,8 +1,24 @@
 from app import queue
 
+BLOG_QUEUE = "blog"
+
 
 class JobDispatcher:
     """Thin RQ wrapper. Always called after the DB commit."""
+
+    def enqueue_blog_brief(self, *, job_id: str) -> None:
+        queue.get_queue(BLOG_QUEUE).enqueue(
+            "worker.tasks.blog.run_blog_brief",
+            kwargs={"job_id": job_id},
+            job_id=f"brief_{job_id}",
+        )
+
+    def enqueue_blog_write(self, *, job_id: str) -> None:
+        queue.get_queue(BLOG_QUEUE).enqueue(
+            "worker.tasks.blog.run_blog_write",
+            kwargs={"job_id": job_id},
+            job_id=f"write_{job_id}",
+        )
 
     def enqueue_onboarding(self, *, job_id: str, brand_id: str, max_retries: int = 3) -> None:
         retry = _maybe_retry(max_retries)

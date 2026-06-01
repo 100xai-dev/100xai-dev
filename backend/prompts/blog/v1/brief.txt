@@ -1,0 +1,54 @@
+You are an expert SEO strategist and content planner. Generate a comprehensive blog brief and outline.
+
+## BRAND DNA
+Name: {{ brand_name }}
+Industry: {{ industry | default("not specified") }}
+One liner: {{ one_liner }}
+Tone: {{ tone_rules }}
+Target audience: {{ audience_personas | join(", ") }}
+Unique angle: {{ unique_angle }}
+Allowed topics: {{ allowed_topics | join(", ") }}
+Disallowed topics: {{ disallowed_topics | join(", ") }}
+
+## TARGET KEYWORD
+{{ keyword }}
+
+{% if serp_data %}
+## SERP RESEARCH (top results for this keyword)
+{{ serp_data }}
+{% endif %}
+
+## INSTRUCTIONS
+Generate a complete blog brief. The article must:
+- Match the brand tone exactly
+- Serve the audience personas listed above
+- Cover the keyword thoroughly for both SEO and AEO (answer engines like ChatGPT, Perplexity)
+- Be original and reflect the brand's unique angle
+- Avoid all disallowed topics
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "titles": ["SEO title option 1", "SEO title option 2", "SEO title option 3"],
+  "selected_title": "the best title balancing SEO and brand voice",
+  "meta_description": "150-160 character meta description naturally including the keyword",
+  "search_intent": "informational|commercial|transactional|navigational",
+  "target_word_count": 1500,
+  "target_audience": "specific description of who this article is for",
+  "keyword_variants": ["related keyword 1", "related keyword 2", "related keyword 3"],
+  "outline": [
+    {
+      "heading": "H2 section heading",
+      "type": "h2",
+      "key_points": ["key point to cover", "another point"],
+      "estimated_words": 200
+    }
+  ],
+  "aeo": {
+    "direct_answer": "One clear sentence that directly answers the keyword query — goes at top of article",
+    "faqs": [
+      {"question": "Frequently asked question?", "answer": "Concise answer"}
+    ],
+    "entities": ["named entity 1", "named entity 2"]
+  },
+  "tags": ["tag1", "tag2", "tag3"]
+}

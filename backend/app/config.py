@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     crawler_page_timeout_sec: int = 20
     crawler_host_delay_sec: int = 1
     apify_api_key: str | None = None
+    dataforseo_login: str | None = None
+    dataforseo_password: str | None = None
+    blog_model: str = "anthropic/claude-3-5-sonnet-20241022"
+    blog_section_max_tokens: int = 2000
+    blog_brief_max_tokens: int = 3000
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

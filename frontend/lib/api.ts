@@ -1,4 +1,5 @@
-import { getBackendBaseUrl, getServerApiToken } from "@/lib/config";
+import { getBackendBaseUrl } from "@/lib/config";
+import type { BlogJobOut } from "@/lib/types";
 import type {
   ApproveBrandResponse,
   BrandCreateRequest,
@@ -22,15 +23,14 @@ function isServer(): boolean {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  // Server components hit the backend directly with the server-only token.
-  // Client components hit the same-origin Next route-handler proxy, which
-  // injects the token server-side so it never reaches the browser.
   const url = isServer() ? `${getBackendBaseUrl()}${path}` : `/api${path}`;
   const headers: HeadersInit = {
     "Content-Type": "application/json",
   };
   if (isServer()) {
-    const token = getServerApiToken();
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const token = cookieStore.get("100xai_access_token")?.value;
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -99,4 +99,40 @@ export async function approveBrand(brandId: string): Promise<ApproveBrandRespons
 
 export async function getJob(jobId: string): Promise<JobRead> {
   return apiRequest<JobRead>(`/v1/jobs/${jobId}`);
+}
+
+// Blog
+export async function createBlogJob(brandId: string, keyword: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs`, { method: "POST", body: { keyword } });
+}
+
+export async function listBlogJobs(brandId: string): Promise<{ items: BlogJobOut[] }> {
+  return apiRequest<{ items: BlogJobOut[] }>(`/v1/brands/${brandId}/blogs`);
+}
+
+export async function getBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}`);
+}
+
+export async function approveBrief(brandId: string, jobId: string, selectedTitle?: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/approve-brief`, {
+    method: "POST",
+    body: { selected_title: selectedTitle ?? null },
+  });
+}
+
+export async function rejectBrief(brandId: string, jobId: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/reject-brief`, { method: "POST" });
+}
+
+export async function approveArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/approve-article`, { method: "POST" });
+}
+
+export async function rejectArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/reject-article`, { method: "POST" });
+}
+
+export async function retryBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/retry`, { method: "POST" });
 }

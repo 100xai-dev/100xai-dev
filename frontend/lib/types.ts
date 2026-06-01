@@ -28,6 +28,56 @@ export type AuthResponse = {
 };
 
 export type DnaSource = "crawl" | "manual";
+
+export type BlogStatus =
+  | "NEW" | "RESEARCHING" | "BRIEFING"
+  | "PENDING_BRIEF_REVIEW" | "WRITING"
+  | "PENDING_REVIEW" | "PUBLISHING"
+  | "PUBLISHED" | "FAILED" | "REJECTED";
+
+export type BlogBriefOut = {
+  id: string;
+  job_id: string;
+  selected_title: string;
+  title_options: string[];
+  meta_description: string;
+  search_intent: string;
+  target_word_count: number;
+  target_audience: string | null;
+  keyword_variants: string[];
+  outline: Array<{ heading: string; type: string; key_points: string[]; estimated_words: number }>;
+  aeo: { direct_answer: string; faqs: Array<{ question: string; answer: string }>; entities: string[] };
+  tags: string[];
+  approved: boolean;
+  created_at: string;
+};
+
+export type BlogDraftOut = {
+  id: string;
+  job_id: string;
+  title: string;
+  meta_description: string;
+  html_content: string;
+  word_count: number;
+  seo_score: number;
+  aeo_score: number;
+  virality_score: number;
+  featured_image_url: string | null;
+  approved: boolean;
+  created_at: string;
+};
+
+export type BlogJobOut = {
+  id: string;
+  brand_id: string;
+  keyword: string;
+  status: BlogStatus;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  brief: BlogBriefOut | null;
+  draft: BlogDraftOut | null;
+};
 export type BrandStatus =
   | "DRAFT"
   | "CRAWLING"
