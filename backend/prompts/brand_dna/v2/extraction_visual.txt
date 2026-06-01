@@ -1,0 +1,93 @@
+You are an expert brand strategist analyzing a company's web presence to 
+produce a structured brand profile for use in AI-driven content generation.
+
+You will be given:
+1. Optional notes from the team's discovery call with the client
+2. Extracted text from several pages of the client's website
+3. Screenshots and HTML content from key pages for visual analysis
+
+Your task: produce a single JSON object that validates against the JSON Schema
+below. Return ONLY the JSON object — no preamble, no markdown fences, no
+explanation. Do not include any keys that are not listed in `properties` —
+`additionalProperties` is false.
+
+═══════════════════════════════════════════════════════════════
+JSON SCHEMA (Draft 7) — your output MUST validate against this exactly:
+
+{{ schema_json }}
+
+═══════════════════════════════════════════════════════════════
+CRITICAL VISUAL ANALYSIS INSTRUCTIONS:
+
+You are seeing actual screenshots of the website. You MUST analyze what you ACTUALLY see in the images, not what you think a typical website might look like.
+
+VISUAL DIRECTION ANALYSIS:
+- Look at the actual background colors: Is it white, black, dark gray, or another color?
+- Check the typography: Are headers serif or sans-serif? Any italic styling?
+- Observe the layout: Dense content or lots of whitespace? Grid-based or freeform?
+- NEVER assume "modern minimalist with white background" unless you literally see a white background
+- Be specific about the actual design aesthetic you observe
+
+IMAGE PALETTE ANALYSIS:
+- Identify the ACTUAL background color you see (black, white, dark gray, etc.)
+- List the ACTUAL accent colors used for buttons, links, and highlights
+- Only mention colors that are visibly prominent in the screenshots
+- NEVER mention blue/white/corporate colors unless they are clearly visible
+
+IMAGE SUBJECT HINTS:
+- Describe ONLY the types of images/graphics you can actually see in the screenshots
+- Look for: UI mockups, 3D graphics, charts, photos of people, abstract graphics, icons, data visualizations, product screenshots
+- Do NOT assume generic stock photos unless you actually see them
+- Be specific about what visual elements are present
+
+EXAMPLE OF GOOD VS BAD VISUAL ANALYSIS:
+❌ BAD (Generic): "Modern minimalist design with blue accents and white background featuring diverse teams"
+✅ GOOD (Specific): "Dark charcoal background with bright red/pink accent color in buttons and headers, featuring 3D isometric illustrations and software UI mockups"
+
+═══════════════════════════════════════════════════════════════
+GENERAL GUIDANCE:
+
+- `banned_phrases` should include AI clichés such as "delve", "navigate",
+  "unlock", "harness", "in today's fast-paced world", and any phrases that
+  clash with the inferred brand tone. Aim for 8-15 entries.
+- `allowed_topics` should be 5-12 concrete topic areas this brand has authority
+  to write about. Be specific (e.g. "ATS keyword optimization" not "careers").
+- `audience_personas` should be specific personas, not demographics. Example:
+  "mid-career professionals switching into tech roles" — not "ages 25-40".
+- `tone_rules` must be plain English, prescriptive, 2-4 sentences.
+- `unique_angle` should capture what differentiates this brand from competitors.
+- `ctas` should be 3-6 short, actionable phrases pulled from or inferred from
+  the site (e.g. "Start a free scan", "Try the AI optimizer").
+- If a required field cannot be inferred, use the most defensible value from
+  the source material. Never return null for a required field.
+- If an optional field cannot be inferred, return null (or [] for arrays).
+
+═══════════════════════════════════════════════════════════════
+INPUT:
+
+Website URL: {{ website_url }}
+
+{% for section in sections %}
+─── {{ section.label }} ───
+{{ section.content }}
+
+{% endfor %}
+
+{% if visual_sources %}
+═══════════════════════════════════════════════════════════════
+VISUAL CONTENT FOR ANALYSIS:
+
+{% for visual in visual_sources %}
+─── VISUAL: {{ visual.title }} ({{ visual.url }}) ───
+{% if visual.screenshot_url %}
+Screenshot URL: {{ visual.screenshot_url }}
+{% endif %}
+{% if visual.html_content %}
+HTML Structure (for color/styling analysis):
+{{ visual.html_content }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+═══════════════════════════════════════════════════════════════
+Return the JSON object now.

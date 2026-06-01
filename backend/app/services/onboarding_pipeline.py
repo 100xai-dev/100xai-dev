@@ -82,6 +82,8 @@ async def _run_pipeline_async(db: Session, *, job_id: str, brand_id: str) -> Non
                 normalized_text=page.normalized_text,
                 metadata_json=page.metadata,
                 word_count=page.word_count,
+                screenshot_url=page.screenshot_url,
+                html_content=page.html_content,
                 fetched_at=datetime.now(timezone.utc),
                 purge_at=purge_dt,
             )

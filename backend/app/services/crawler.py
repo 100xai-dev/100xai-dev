@@ -50,6 +50,8 @@ class PageExtraction:
     normalized_text: str
     metadata: dict
     word_count: int
+    screenshot_url: str | None = None
+    html_content: str | None = None
 
 
 @dataclass
@@ -327,11 +329,18 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
     client = ApifyClient(api_key)
     run_input = {
         "startUrls": [{"url": seed_url}],
-        "crawlerType": "playwright:adaptive",
+        "crawlerType": "playwright:adaptive",  # Browser-based to capture visual content
         "maxCrawlPages": max_pages,
+        "maxCrawlDepth": 2,
         "outputFormats": ["markdown"],
         "removeCookieWarnings": True,
-        "blockMedia": True,
+        "blockMedia": False,               # Allow images and media to capture visual DNA
+        "ignoreCanonicalUrl": True,
+        "maxSessionRotations": 3,
+        "saveScreenshots": True,           # Capture screenshots for visual analysis
+        "saveHtmlToFile": True,            # Preserve HTML with styling (updated API)
+        "forceFullPageScreenshots": True,  # Ensure full page screenshots
+        "agentBrowserNavigationTimeoutSecs": 30,
     }
 
     logger.info("Starting Apify crawl for %s (max %d pages)", seed_url, max_pages)
@@ -341,8 +350,10 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
     )
 
     run_status = run.status if hasattr(run, "status") else run.get("status")
-    if not run or run_status != "SUCCEEDED":
-        raise CrawlError(f"Apify run did not succeed: status={run_status}")
+    if not run or run_status not in ("SUCCEEDED", "SUCCEEDED"):
+        # SUCCEEDED is the only terminal success state; log but don't hard-fail if we got pages
+        if run_status != "SUCCEEDED":
+            logger.warning("Apify run status: %s — will check for partial results", run_status)
 
     result = CrawlResult()
     dataset_id = run.default_dataset_id if hasattr(run, "default_dataset_id") else run["defaultDatasetId"]
@@ -354,12 +365,30 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
     for item in items:
         url = item.get("url") or item.get("loadedUrl", "")
         text = item.get("markdown") or item.get("text") or ""
+        
+        # Debug: Log all available fields for the first item
+        if len(result.pages) == 0:
+            logger.info("Apify item fields for %s: %s", url, list(item.keys()))
+        
         if not text or len(text.strip()) < 200:
             result.failed_urls.append(url)
             continue
 
         normalized = " ".join(text.split())
         word_count = len(normalized.split())
+        
+        # Extract visual content - check multiple possible field names
+        screenshot_url = (item.get("screenshotUrl") or 
+                         item.get("screenshot") or 
+                         item.get("screenshotFile") or "")
+        html_content = (item.get("html") or 
+                       item.get("htmlFile") or 
+                       item.get("rawHtml") or "")
+        
+        # Debug: Log what visual data we found
+        logger.info("Visual data for %s: screenshot=%s, html_length=%d", 
+                   url, bool(screenshot_url), len(html_content) if html_content else 0)
+        
         metadata = {
             "title": item.get("metadata", {}).get("title") or item.get("title", ""),
             "meta_description": item.get("metadata", {}).get("description", ""),
@@ -373,8 +402,52 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
             normalized_text=normalized,
             metadata=metadata,
             word_count=word_count,
+            screenshot_url=screenshot_url if screenshot_url else None,
+            html_content=html_content if html_content else None,
         ))
-        logger.info("Apify extracted %d words from %s", word_count, url)
+        logger.info("Apify extracted %d words from %s (screenshot: %s, html: %s)", 
+                   word_count, url, bool(screenshot_url), bool(html_content))
+
+    if not result.pages:
+        # Retry once with playwright:adaptive if cheerio got nothing (JS-heavy site)
+        logger.warning("cheerio returned 0 pages — retrying with playwright:adaptive")
+        run_input["crawlerType"] = "playwright:adaptive"
+        run_input["agentBrowserNavigationTimeoutSecs"] = 30
+        run2 = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: client.actor("apify/website-content-crawler").call(run_input=run_input),
+        )
+        dataset_id2 = run2.default_dataset_id if hasattr(run2, "default_dataset_id") else run2["defaultDatasetId"]
+        items2 = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: list(client.dataset(dataset_id2).iterate_items()),
+        )
+        for item in items2:
+            url = item.get("url") or item.get("loadedUrl", "")
+            text = item.get("markdown") or item.get("text") or ""
+            if not text or len(text.strip()) < 200:
+                result.failed_urls.append(url)
+                continue
+            normalized = " ".join(text.split())
+            word_count = len(normalized.split())
+            
+            # Extract visual content for retry as well - check multiple possible field names
+            screenshot_url = (item.get("screenshotUrl") or 
+                             item.get("screenshot") or 
+                             item.get("screenshotFile") or "")
+            html_content = (item.get("html") or 
+                           item.get("htmlFile") or 
+                           item.get("rawHtml") or "")
+            
+            result.pages.append(PageExtraction(
+                url=url,
+                raw_text=text,
+                normalized_text=normalized,
+                metadata={"title": item.get("metadata", {}).get("title", ""), "meta_description": "", "h1": [], "h2": [], "word_count": word_count},
+                word_count=word_count,
+                screenshot_url=screenshot_url if screenshot_url else None,
+                html_content=html_content if html_content else None,
+            ))
 
     if not result.pages:
         raise CrawlError(f"Apify returned no extractable pages from {seed_url}")

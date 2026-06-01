@@ -11,12 +11,11 @@ from app.schemas.brand import (
     ApproveBrandResponse,
     BrandCreate,
     BrandCreateResponse,
-    DeleteBrandResponse,
     BrandListResponse,
     BrandSummary,
 )
 from app.schemas.brand_profile import BrandProfileContent, BrandProfileFull, BrandProfilePatch
-from app.services.brand_service import approve_brand, create_brand, patch_profile, request_delete, submit_manual_profile
+from app.services.brand_service import approve_brand, create_brand, delete_brand_immediately, patch_profile, submit_manual_profile
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -59,15 +58,14 @@ def get_brand_endpoint(
     return _brand_summary(db, brand.id, current_user.org_id)
 
 
-@router.delete("/{brand_id}", response_model=DeleteBrandResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.delete("/{brand_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_brand_endpoint(
     brand_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
-) -> DeleteBrandResponse:
+) -> None:
     require_role(current_user.role, {"admin"})
-    job = request_delete(db, brand_id, current_user)
-    return DeleteBrandResponse(job_id=job.id)
+    delete_brand_immediately(db, brand_id, current_user)
 
 
 @router.post("/{brand_id}/profile", response_model=BrandProfileFull, status_code=status.HTTP_201_CREATED)

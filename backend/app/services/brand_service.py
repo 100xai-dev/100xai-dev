@@ -64,39 +64,31 @@ def create_brand(db: Session, payload: BrandCreate, user: CurrentUser) -> tuple[
     return brand, job
 
 
-def request_delete(db: Session, brand_id: str, user: CurrentUser) -> Job:
+def delete_brand_immediately(db: Session, brand_id: str, user: CurrentUser) -> None:
+    """Delete a brand immediately without queueing."""
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient role")
     brand = get_brand(db, brand_id, user.org_id)
     if not brand:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resource not found")
-    if brand.status == "PENDING_DELETE":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="brand already pending delete")
-
-    brand.status = "PENDING_DELETE"
-    job = JobsRepository(db).create(
-        org_id=user.org_id,
-        brand_id=brand.id,
-        job_type="brand.purge",
-        stage="PENDING_DELETE",
-        input_payload={"brand_id": brand.id},
-    )
+    
+    # Audit the deletion before removing the brand
     write_audit(
         db,
         org_id=user.org_id,
         user_id=user.id,
         brand_id=brand.id,
-        action="brand.delete_requested",
+        action="brand.deleted",
         resource_type="brand",
         resource_id=brand.id,
+        metadata={"brand_name": brand.name},
     )
+    
+    # Delete the brand (CASCADE will handle related records)
+    db.delete(brand)
     db.commit()
-    db.refresh(job)
-    try:
-        JobDispatcher().enqueue_purge(job_id=job.id, brand_id=brand.id)
-    except Exception:
-        logger.exception("enqueue purge failed for job %s", job.id)
-    return job
+    
+    logger.info("Brand %s (%s) deleted immediately by user %s", brand_id, brand.name, user.id)
 
 
 def submit_manual_profile(

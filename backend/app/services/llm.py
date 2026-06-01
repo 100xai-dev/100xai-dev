@@ -32,15 +32,27 @@ class LLMService:
         response_format: Literal["text", "json"] = "text",
         max_tokens: int = 4000,
         temperature: float = 0.3,
+        images: list[str] | None = None,
     ) -> str:
         """Single-shot LLM call. Returns assistant's text content."""
         api_key = self._settings.openrouter_api_key
         if not api_key:
             raise LLMError("OPENROUTER_API_KEY is not configured")
 
+        # Build message content with optional images
+        if images:
+            content = [{"type": "text", "text": prompt}]
+            for image_url in images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                })
+        else:
+            content = prompt
+
         payload: dict = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
@@ -77,6 +89,7 @@ class LLMService:
         response_format: Literal["text", "json"] = "text",
         max_tokens: int = 4000,
         temperature: float = 0.3,
+        images: list[str] | None = None,
     ) -> str:
         """
         Tries the primary extraction model; falls back once if it returns 5xx.
@@ -89,6 +102,7 @@ class LLMService:
                 response_format=response_format,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                images=images,
             )
         except LLMError as e:
             if "5xx" in str(e):
@@ -99,6 +113,7 @@ class LLMService:
                     response_format=response_format,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    images=images,
                 )
             raise
 

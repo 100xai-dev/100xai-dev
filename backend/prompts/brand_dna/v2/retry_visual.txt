@@ -1,0 +1,41 @@
+Your previous response did not validate against the schema.
+
+Validation errors:
+{% for error in validation_errors %}
+- {{ error }}
+{% endfor %}
+
+Your previous response:
+{{ previous_response }}
+
+═══════════════════════════════════════════════════════════════
+
+Read the errors carefully. Produce a corrected JSON object matching the
+schema exactly. Return ONLY the JSON — no commentary, no markdown.
+
+Same input applies:
+
+Website URL: {{ website_url }}
+
+{% for section in sections %}
+─── {{ section.label }} ───
+{{ section.content }}
+
+{% endfor %}
+
+{% if visual_sources %}
+═══════════════════════════════════════════════════════════════
+VISUAL CONTENT FOR ANALYSIS:
+
+{% for visual in visual_sources %}
+─── VISUAL: {{ visual.title }} ({{ visual.url }}) ───
+{% if visual.screenshot_url %}
+Screenshot URL: {{ visual.screenshot_url }}
+{% endif %}
+{% if visual.html_content %}
+HTML Structure (for color/styling analysis):
+{{ visual.html_content }}
+{% endif %}
+
+{% endfor %}
+{% endif %}

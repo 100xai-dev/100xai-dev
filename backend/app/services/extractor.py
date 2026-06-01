@@ -66,7 +66,7 @@ def assemble_extraction_input(
     """
     Assemble the LLM input blob from crawled sources and optional manual hints.
     Token budget cap: ~60,000 input tokens (approximated as chars/4).
-    Returns a dict with keys: website_url, sections.
+    Returns a dict with keys: website_url, sections, visual_sources.
     """
     sections: list[dict] = []
     char_budget = 240_000  # ~60k tokens × 4 chars/token
@@ -143,7 +143,22 @@ def assemble_extraction_input(
             "content": _truncate(s.normalized_text or "", min(8_000, remaining_now)),
         })
 
-    return {"website_url": website_url or "", "sections": sections}
+    # Collect visual sources (screenshots and HTML) for visual DNA analysis
+    visual_sources = []
+    for s in sources:
+        if s.screenshot_url or s.html_content:
+            visual_sources.append({
+                "url": s.url,
+                "title": s.metadata_json.get("title") or s.url,
+                "screenshot_url": s.screenshot_url,
+                "html_content": s.html_content[:10000] if s.html_content else None,  # Limit HTML size
+            })
+
+    return {
+        "website_url": website_url or "", 
+        "sections": sections,
+        "visual_sources": visual_sources
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -167,13 +182,29 @@ async def extract_brand_profile(
 
     input_blob = assemble_extraction_input(sources, manual_hints, website_url)
     schema_json = json.dumps(_load_schema(), indent=2)
+    
+    # Check for visual sources and prepare for multimodal analysis
+    visual_sources = input_blob.get("visual_sources", [])
+    has_visual_content = bool(visual_sources)
+    
+    # Extract screenshot URLs for vision analysis
+    screenshot_urls = []
+    if has_visual_content:
+        for vs in visual_sources:
+            if vs.get("screenshot_url"):
+                screenshot_urls.append(vs["screenshot_url"])
+        # Limit to first 3 screenshots to avoid token limits
+        screenshot_urls = screenshot_urls[:3]
+    
+    template_path = "brand_dna/v2/extraction_visual.txt" if has_visual_content else "brand_dna/v1/extraction.txt"
+    
     prompt = render_prompt(
-        "brand_dna/v1/extraction.txt",
+        template_path,
         {**input_blob, "schema_json": schema_json},
     )
 
-    logger.info("Running extraction for brand %s (model=%s, sections=%d)",
-                brand_id, extraction_model, len(input_blob["sections"]))
+    logger.info("Running extraction for brand %s (model=%s, sections=%d, screenshots=%d)",
+                brand_id, extraction_model, len(input_blob["sections"]), len(screenshot_urls))
 
     try:
         raw_response = await llm.call_with_fallback(
@@ -181,6 +212,7 @@ async def extract_brand_profile(
             response_format="json",
             max_tokens=4000,
             temperature=0.3,
+            images=screenshot_urls if screenshot_urls else None,
         )
     except LLMError as exc:
         raise ExtractionValidationError([f"LLM call failed: {exc}"]) from exc
@@ -191,7 +223,9 @@ async def extract_brand_profile(
     if validation_errors:
         logger.warning("Extraction schema validation failed (%d errors), retrying…",
                        len(validation_errors))
-        retry_prompt = render_prompt("brand_dna/v1/retry.txt", {
+        # Use corresponding retry template
+        retry_template = "brand_dna/v2/retry_visual.txt" if has_visual_content else "brand_dna/v1/retry.txt"
+        retry_prompt = render_prompt(retry_template, {
             **input_blob,
             "schema_json": schema_json,
             "previous_response": raw_response,
@@ -203,6 +237,7 @@ async def extract_brand_profile(
                 response_format="json",
                 max_tokens=4000,
                 temperature=0.2,
+                images=screenshot_urls if screenshot_urls else None,
             )
         except LLMError as exc:
             raise ExtractionValidationError([f"LLM retry call failed: {exc}"]) from exc

@@ -18,60 +18,59 @@ def create_manual_brand(client: TestClient, db_session: Session) -> tuple[Brand,
     return brand, headers
 
 
-def test_delete_sets_pending_delete_and_enqueues_purge(
+def test_delete_brand_immediately(
     client: TestClient,
     db_session: Session,
-    fake_queues: dict[str, FakeQueue],
 ) -> None:
     brand, headers = create_manual_brand(client, db_session)
+    brand_id = brand.id
 
     response = client.delete(f"/v1/brands/{brand.id}", headers=headers)
 
-    assert response.status_code == 202
-    assert response.json()["job_id"]
-    db_session.refresh(brand)
-    assert brand.status == "PENDING_DELETE"
-
-    job = db_session.query(Job).filter_by(id=response.json()["job_id"]).one()
-    assert job.job_type == "brand.purge"
-    assert job.status == "QUEUED"
-
-    purge = fake_queues["purge"]
-    assert len(purge.calls) == 1
-    assert purge.calls[0].func == "worker.tasks.purge.purge_brand"
-    assert purge.calls[0].kwargs == {"job_id": job.id, "brand_id": brand.id}
+    # Brand deletion is now immediate
+    assert response.status_code == 204
+    assert not response.content  # No content for 204
+    
+    # Brand should be completely deleted
+    deleted_brand = db_session.query(Brand).filter_by(id=brand_id).first()
+    assert deleted_brand is None
+    
+    # No purge jobs should be created
+    purge_jobs = db_session.query(Job).filter_by(job_type="brand.purge").all()
+    assert len(purge_jobs) == 0
 
 
-def test_delete_idempotent_returns_409(
+def test_delete_nonexistent_brand_returns_404(
     client: TestClient,
     db_session: Session,
-    fake_queues: dict[str, FakeQueue],
 ) -> None:
     brand, headers = create_manual_brand(client, db_session)
+    brand_id = brand.id
 
-    first_response = client.delete(f"/v1/brands/{brand.id}", headers=headers)
-    second_response = client.delete(f"/v1/brands/{brand.id}", headers=headers)
+    first_response = client.delete(f"/v1/brands/{brand_id}", headers=headers)
+    second_response = client.delete(f"/v1/brands/{brand_id}", headers=headers)
 
-    assert first_response.status_code == 202
-    assert second_response.status_code == 409
-    assert len(fake_queues["purge"].calls) == 1
+    assert first_response.status_code == 204
+    assert second_response.status_code == 404  # Brand no longer exists
 
 
 def test_delete_writes_audit_log(
     client: TestClient,
     db_session: Session,
-    fake_queues: dict[str, FakeQueue],
 ) -> None:
     brand, headers = create_manual_brand(client, db_session)
+    brand_id = brand.id
+    brand_name = brand.name
 
     response = client.delete(f"/v1/brands/{brand.id}", headers=headers)
 
-    assert response.status_code == 202
+    assert response.status_code == 204
     audit = (
         db_session.query(AuditLog)
-        .filter(AuditLog.brand_id == brand.id, AuditLog.action == "brand.delete_requested")
+        .filter(AuditLog.brand_id == brand_id, AuditLog.action == "brand.deleted")
         .one()
     )
     assert audit.resource_type == "brand"
-    assert audit.resource_id == brand.id
+    assert audit.resource_id == brand_id
+    assert audit.metadata_json["brand_name"] == brand_name
 

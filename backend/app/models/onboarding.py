@@ -87,6 +87,8 @@ class BrandKnowledgeSource(Base):
     normalized_text: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     word_count: Mapped[int | None] = mapped_column(Integer)
+    screenshot_url: Mapped[str | None] = mapped_column(String)
+    html_content: Mapped[str | None] = mapped_column(Text)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     purge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

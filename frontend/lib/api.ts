@@ -23,17 +23,20 @@ function isServer(): boolean {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = isServer() ? `${getBackendBaseUrl()}${path}` : `/api${path}`;
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-  };
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+
+  let url: string;
   if (isServer()) {
+    url = `${getBackendBaseUrl()}${path}`;
     const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
     const token = cookieStore.get("100xai_access_token")?.value;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } else {
+    // Client: call backend directly with token from localStorage (avoids proxy cookie timing issues)
+    url = `${getBackendBaseUrl()}${path}`;
+    const token = localStorage.getItem("100xai_access_token");
+    if (token) headers.Authorization = `Bearer ${token}`;
   }
   const response = await fetch(url, {
     method: options.method ?? "GET",
