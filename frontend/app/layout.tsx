@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { DM_Sans, DM_Mono } from "next/font/google";
 import Link from "next/link";
 
+import { AuthProvider } from "@/context/AuthContext";
+import { LogoutButton } from "@/components/LogoutButton";
 import "./globals.css";
 
 const sans = DM_Sans({
@@ -27,6 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html className={`${sans.variable} ${mono.variable}`} lang="en">
       <body>
+        <AuthProvider>
         <div className="app-shell">
           <header className="topbar">
             <div className="topbar-brand">
@@ -46,10 +49,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link className="topbar-link primary" href="/brands/new">
                 + New Brand
               </Link>
+              <LogoutButton />
             </nav>
           </header>
           <main>{children}</main>
         </div>
+        </AuthProvider>
       </body>
     </html>
   );

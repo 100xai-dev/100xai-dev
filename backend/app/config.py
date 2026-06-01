@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "dev-secret-change-me-at-least-32-chars"
     jwt_expiry_hours: int = 24
+    access_token_expiry_minutes: int = 15
+    refresh_token_secret: str = "dev-refresh-secret-change-me-at-least-32-chars"
+    refresh_token_expiry_days: int = 30
     token_encryption_key: str | None = None
     token_encryption_key_id: str = "v1"
     # Optional JSON map of historical keys for rotation, e.g.

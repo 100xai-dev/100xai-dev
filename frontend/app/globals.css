@@ -697,3 +697,17 @@ button.btn-ghost:hover:not(:disabled) {
   .topbar-nav { gap: 4px; }
   h1 { font-size: 1.5rem; }
 }
+
+/* ── Auth pages ── */
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+}

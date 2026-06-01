@@ -7,6 +7,26 @@
 // instead of the hand types below. Until the migration is complete, the hand types
 // remain the source of truth so the frontend builds without a running backend.
 
+export type UserOut = {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string;
+  org_id: string;
+};
+
+export type OrgOut = {
+  id: string;
+  name: string;
+};
+
+export type AuthResponse = {
+  user: UserOut;
+  organization: OrgOut;
+  access_token: string;
+  refresh_token: string;
+};
+
 export type DnaSource = "crawl" | "manual";
 export type BrandStatus =
   | "DRAFT"
