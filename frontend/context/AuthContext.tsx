@@ -113,6 +113,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = await getValidAccessToken();
     if (token !== state.accessToken) {
       setState((s) => ({ ...s, accessToken: token }));
+      // Ensure cookie is synced when token changes
+      if (token) {
+        document.cookie = `100xai_access_token=${token}; path=/; max-age=900; SameSite=Lax`;
+      }
     }
     return token;
   }, [state.accessToken]);

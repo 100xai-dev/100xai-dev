@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth.rbac import require_role
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user
-from app.models import Brand, BrandProfile
+from app.models import Brand, BrandProfile, Job, Keyword
 from app.repositories.brands import get_brand
 from app.schemas.brand import (
     ApproveBrandResponse,
@@ -15,6 +15,7 @@ from app.schemas.brand import (
     BrandSummary,
 )
 from app.schemas.brand_profile import BrandProfileContent, BrandProfileFull, BrandProfilePatch
+from app.schemas.keyword import KeywordListResponse, KeywordOut, KeywordResearchRequest, KeywordResearchResponse, KeywordStatsResponse
 from app.services.brand_service import approve_brand, create_brand, delete_brand_immediately, patch_profile, submit_manual_profile
 
 router = APIRouter(prefix="/brands", tags=["brands"])
@@ -218,4 +219,182 @@ def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
         locked_by=profile.locked_by,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Keyword Research Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/{brand_id}/keywords/research", response_model=KeywordResearchResponse)
+def start_keyword_research(
+    brand_id: str,
+    payload: KeywordResearchRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> KeywordResearchResponse:
+    """Start keyword research for a brand."""
+    require_role(current_user.role, {"admin", "team_member"})
+    
+    # Verify brand exists and user has access
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    
+    # Get brand profile for context
+    brand_profile = db.query(BrandProfile).filter(BrandProfile.brand_id == brand_id).first()
+    brand_context = ""
+    business_description = ""
+    
+    if brand_profile:
+        brand_context = f"{brand_profile.one_liner}. Industry: {brand_profile.industry or 'Unknown'}. Unique angle: {brand_profile.unique_angle}"
+        business_description = brand_profile.tone_rules or brand_profile.one_liner
+    
+    # Create job
+    job = Job(
+        brand_id=brand_id,
+        org_id=current_user.org_id,
+        job_type="keyword_research",
+        status="QUEUED",
+        stage="NEW",
+        input_payload={"seed_keyword": payload.seed_keyword}
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    
+    # Enqueue the keyword research job
+    from app.services.job_dispatcher import JobDispatcher
+    dispatcher = JobDispatcher()
+    dispatcher.enqueue_keyword_research(
+        job_id=job.id,
+        brand_id=brand_id,
+        primary_keyword=payload.seed_keyword,
+        brand_context=brand_context,
+        business_description=business_description
+    )
+    
+    return KeywordResearchResponse(
+        job_id=job.id,
+        brand_id=brand_id,
+        seed_keyword=payload.seed_keyword,
+        status="QUEUED",
+        message=f"Keyword research started for '{payload.seed_keyword}'. This may take 5-10 minutes."
+    )
+
+
+@router.get("/{brand_id}/keywords", response_model=KeywordListResponse)
+def list_keywords(
+    brand_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> KeywordListResponse:
+    """List keywords discovered for a brand."""
+    require_role(current_user.role, {"admin", "team_member", "viewer"})
+    
+    # Verify brand exists and user has access
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    
+    # Get latest keyword research job
+    latest_job = db.query(Job).filter(
+        Job.brand_id == brand_id,
+        Job.job_type == "keyword_research"
+    ).order_by(Job.created_at.desc()).first()
+    
+    # Determine research status
+    research_status = "never_run"
+    if latest_job:
+        if latest_job.status in ["QUEUED", "RUNNING"]:
+            research_status = "processing"
+        elif latest_job.status == "SUCCEEDED":
+            research_status = "completed"
+        elif latest_job.status == "FAILED":
+            research_status = "failed"
+    
+    # Get keywords with pagination
+    keywords_query = db.query(Keyword).filter(Keyword.brand_id == brand_id).order_by(Keyword.score.desc().nullslast())
+    total = keywords_query.count()
+    keywords = keywords_query.offset(offset).limit(limit).all()
+    
+    keyword_outs = [
+        KeywordOut(
+            id=kw.id,
+            related_keyword=kw.related_keyword,
+            primary_keyword=kw.primary_keyword,
+            source_type=kw.source_type,
+            search_volume=kw.search_volume,
+            keyword_difficulty=kw.keyword_difficulty,
+            cpc=kw.cpc,
+            competition=kw.competition,
+            search_intent=kw.search_intent,
+            score=kw.score,
+            created_at=kw.created_at
+        )
+        for kw in keywords
+    ]
+    
+    return KeywordListResponse(
+        keywords=keyword_outs,
+        total=total,
+        brand_id=brand_id,
+        latest_job_id=latest_job.id if latest_job else None,
+        research_status=research_status
+    )
+
+
+@router.get("/{brand_id}/keywords/stats", response_model=KeywordStatsResponse)
+def get_keyword_stats(
+    brand_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> KeywordStatsResponse:
+    """Get keyword research statistics for a brand."""
+    require_role(current_user.role, {"admin", "team_member", "viewer"})
+    
+    # Verify brand exists and user has access
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    
+    keywords = db.query(Keyword).filter(Keyword.brand_id == brand_id).all()
+    
+    if not keywords:
+        return KeywordStatsResponse(
+            total_keywords=0,
+            avg_search_volume=None,
+            avg_difficulty=None,
+            top_sources={},
+            completion_rate=0.0
+        )
+    
+    # Calculate statistics
+    volumes = [k.search_volume for k in keywords if k.search_volume is not None]
+    difficulties = [k.keyword_difficulty for k in keywords if k.keyword_difficulty is not None]
+    
+    avg_volume = sum(volumes) / len(volumes) if volumes else None
+    avg_difficulty = sum(difficulties) / len(difficulties) if difficulties else None
+    
+    # Count by source type
+    source_counts = {}
+    for kw in keywords:
+        source_counts[kw.source_type] = source_counts.get(kw.source_type, 0) + 1
+    
+    # Calculate completion rate (keywords with all metrics)
+    complete_keywords = sum(1 for k in keywords if all([
+        k.search_volume is not None,
+        k.keyword_difficulty is not None,
+        k.score is not None
+    ]))
+    completion_rate = complete_keywords / len(keywords) if keywords else 0.0
+    
+    return KeywordStatsResponse(
+        total_keywords=len(keywords),
+        avg_search_volume=avg_volume,
+        avg_difficulty=avg_difficulty,
+        top_sources=source_counts,
+        completion_rate=completion_rate
     )

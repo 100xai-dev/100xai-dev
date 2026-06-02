@@ -1,6 +1,13 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve .env paths relative to this file so the worker loads them
+# correctly regardless of the working directory it is started from.
+_THIS_DIR = Path(__file__).parent          # backend/app/
+_BACKEND_ENV = _THIS_DIR.parent / ".env"   # backend/.env
+_ROOT_ENV = _THIS_DIR.parent.parent / ".env"  # 100xai/.env (fallback)
 
 
 class Settings(BaseSettings):
@@ -38,7 +45,11 @@ class Settings(BaseSettings):
     blog_section_max_tokens: int = 2000
     blog_brief_max_tokens: int = 3000
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=[str(_ROOT_ENV), str(_BACKEND_ENV)],  # root first, backend overrides
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache

@@ -139,3 +139,87 @@ export async function rejectArticle(brandId: string, jobId: string): Promise<Blo
 export async function retryBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
   return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/retry`, { method: "POST" });
 }
+
+// Keyword Research
+export async function startKeywordResearch(brandId: string, seedKeyword: string): Promise<{
+  job_id: string;
+  brand_id: string;
+  seed_keyword: string;
+  status: string;
+  message: string;
+}> {
+  return apiRequest(`/v1/brands/${brandId}/keywords/research`, {
+    method: "POST",
+    body: { seed_keyword: seedKeyword },
+  });
+}
+
+export async function listKeywords(brandId: string, limit = 50, offset = 0): Promise<{
+  keywords: Array<{
+    id: string;
+    related_keyword: string;
+    primary_keyword: string;
+    source_type: string;
+    search_volume: number | null;
+    keyword_difficulty: number | null;
+    cpc: number | null;
+    competition: number | null;
+    search_intent: string | null;
+    score: number | null;
+    created_at: string;
+  }>;
+  total: number;
+  brand_id: string;
+  latest_job_id: string | null;
+  research_status: string;
+}> {
+  return apiRequest(`/v1/brands/${brandId}/keywords?limit=${limit}&offset=${offset}`);
+}
+
+export async function getKeywordStats(brandId: string): Promise<{
+  total_keywords: number;
+  avg_search_volume: number | null;
+  avg_difficulty: number | null;
+  top_sources: Record<string, number>;
+  completion_rate: number;
+}> {
+  return apiRequest(`/v1/brands/${brandId}/keywords/stats`);
+}
+
+// SERP Analysis (Pipeline 2)
+export async function startSerpAnalysis(brandId: string, keywords?: string[]): Promise<{
+  job_id: string;
+  brand_id: string;
+  keywords_count: number;
+  status: string;
+  message: string;
+}> {
+  return apiRequest(`/v1/brands/${brandId}/serp-analysis`, {
+    method: "POST",
+    body: keywords ? { target_keywords: keywords } : {},
+  });
+}
+
+export async function getSerpAnalysisResults(brandId: string): Promise<{
+  serp_analyses: Array<{
+    id: string;
+    keyword_text: string;
+    status: string;
+    total_results_analyzed: number;
+    avg_word_count: number | null;
+    content_gap_score: number | null;
+    created_at: string;
+    competitors: Array<{
+      url: string;
+      title: string;
+      content_strength: number | null;
+      content_gaps: string[];
+      competitive_advantage: string | null;
+    }>;
+  }>;
+  total_analyses: number;
+  latest_job_id: string | null;
+  analysis_status: string;
+}> {
+  return apiRequest(`/v1/brands/${brandId}/serp-analysis`);
+}

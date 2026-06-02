@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { BrandActions } from "@/components/brand/brand-actions";
 import { JobStatusLive } from "@/components/brand/job-status-live";
 import { StatusBadge } from "@/components/brand/status-badge";
+import { KeywordResearchWidget } from "@/components/brand/keyword-research-widget";
 import { getBrand } from "@/lib/api";
 import { isDemoMode } from "@/lib/config";
 
@@ -20,11 +21,12 @@ const tabs = [
   { num: "01", label: "DNA Review & Curation", href: (id: string) => `/brands/${id}/dna` },
   { num: "02", label: "Manual Profile Input", href: (id: string) => `/brands/${id}/dna/manual` },
   { num: "03", label: "Knowledge Base Sources", href: (id: string) => `/brands/${id}/sources` },
-  { num: "04", label: "Connected Services", href: (id: string) => `/brands/${id}/integrations` },
-  { num: "05", label: "WordPress Engine Setup", href: (id: string) => `/brands/${id}/integrations/wordpress` },
-  { num: "06", label: "Operational Params", href: (id: string) => `/brands/${id}/operational` },
-  { num: "07", label: "Audit Trail", href: (id: string) => `/brands/${id}/audit` },
-  { num: "08", label: "Blog Engine", href: (id: string) => `/brands/${id}/blogs` },
+  { num: "04", label: "Keyword Research", href: (id: string) => `/brands/${id}/keywords` },
+  { num: "05", label: "Connected Services", href: (id: string) => `/brands/${id}/integrations` },
+  { num: "06", label: "WordPress Engine Setup", href: (id: string) => `/brands/${id}/integrations/wordpress` },
+  { num: "07", label: "Operational Params", href: (id: string) => `/brands/${id}/operational` },
+  { num: "08", label: "Audit Trail", href: (id: string) => `/brands/${id}/audit` },
+  { num: "09", label: "Blog Engine", href: (id: string) => `/brands/${id}/blogs` },
 ];
 
 export default async function BrandDetailPage({ params }: PageProps) {
@@ -120,6 +122,14 @@ export default async function BrandDetailPage({ params }: PageProps) {
             </Link>
           </div>
           <JobStatusLive jobId={brand.active_job.id} initial={null} variant="compact" />
+        </div>
+      )}
+
+      {/* Quick Insights */}
+      {!isDemo && brand.status === "READY" && (
+        <div>
+          <div className="section-heading">Quick Insights</div>
+          <KeywordResearchWidget brandId={brand.id} />
         </div>
       )}
 

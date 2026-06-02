@@ -501,5 +501,41 @@ async def crawl_brand_website(
     return result
 
 
+async def _make_apify_request(actor_name: str, run_input: dict, timeout_seconds: int = 60) -> dict:
+    """
+    Make a request to an Apify actor and return the dataset items.
+    Used by SERP analysis service for competitor page crawling.
+    """
+    from apify_client import ApifyClient
+    from app.config import get_settings
+
+    api_key = get_settings().apify_api_key
+    if not api_key:
+        raise CrawlError("APIFY_API_KEY is not configured")
+
+    client = ApifyClient(api_key)
+    
+    logger.info("Starting Apify actor %s with input: %s", actor_name, run_input)
+    
+    # Run the actor
+    run = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.actor(actor_name).call(run_input=run_input),
+    )
+
+    # Get the dataset results
+    dataset_id = run.default_dataset_id if hasattr(run, "default_dataset_id") else run["defaultDatasetId"]
+    items = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: list(client.dataset(dataset_id).iterate_items()),
+    )
+    
+    return {
+        "run": run,
+        "items": items,
+        "run_status": run.status if hasattr(run, "status") else run.get("status")
+    }
+
+
 class CrawlError(Exception):
     """Raised when crawling fails unrecoverably."""

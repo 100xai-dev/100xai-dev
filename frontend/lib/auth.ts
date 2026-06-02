@@ -66,6 +66,8 @@ export async function refreshAccessToken(): Promise<string | null> {
     }
     const data = (await res.json()) as { access_token: string };
     localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token);
+    // Update cookie so middleware can see the new token
+    document.cookie = `${ACCESS_TOKEN_KEY}=${data.access_token}; path=/; max-age=900; SameSite=Lax`;
     return data.access_token;
   } catch {
     return null;
