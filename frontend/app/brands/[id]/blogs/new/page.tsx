@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { createBlogJob } from "@/lib/api";
@@ -14,9 +14,11 @@ const INTENT_TIPS = [
 export default function NewBlogPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const brandId = params.id as string;
 
-  const [keyword, setKeyword] = useState("");
+  // Pre-fill from ?keyword= query param (e.g. when arriving from SERP analysis)
+  const [keyword, setKeyword] = useState(searchParams.get("keyword") ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 

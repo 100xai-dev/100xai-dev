@@ -322,31 +322,54 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
     from apify_client import ApifyClient
     from app.config import get_settings
 
-    api_key = get_settings().apify_api_key
+    settings = get_settings()
+    api_key = settings.apify_api_key
     if not api_key:
         raise CrawlError("APIFY_API_KEY is not configured")
 
     client = ApifyClient(api_key)
-    run_input = {
-        "startUrls": [{"url": seed_url}],
-        "crawlerType": "playwright:adaptive",  # Browser-based to capture visual content
-        "maxCrawlPages": max_pages,
-        "maxCrawlDepth": 2,
-        "outputFormats": ["markdown"],
-        "removeCookieWarnings": True,
-        "blockMedia": False,               # Allow images and media to capture visual DNA
-        "ignoreCanonicalUrl": True,
-        "maxSessionRotations": 3,
-        "saveScreenshots": True,           # Capture screenshots for visual analysis
-        "saveHtmlToFile": True,            # Preserve HTML with styling (updated API)
-        "forceFullPageScreenshots": True,  # Ensure full page screenshots
-        "agentBrowserNavigationTimeoutSecs": 30,
-    }
+    
+    # Configure based on plan tier
+    if settings.apify_premium_features:
+        # Premium settings for paid plans
+        run_input = {
+            "startUrls": [{"url": seed_url}],
+            "crawlerType": "playwright:adaptive",  # Browser-based for visual content
+            "maxCrawlPages": max_pages,
+            "maxCrawlDepth": 2,
+            "outputFormats": ["markdown"],
+            "removeCookieWarnings": True,
+            "blockMedia": False,               # Allow images and media
+            "ignoreCanonicalUrl": True,
+            "maxSessionRotations": 3,
+            "saveScreenshots": True,           # Enable screenshots
+            "saveHtmlToFile": True,            # Enable HTML saving
+            "forceFullPageScreenshots": True,
+            "agentBrowserNavigationTimeoutSecs": 30,
+        }
+        logger.info("Using Apify premium features for %s", seed_url)
+    else:
+        # Memory-efficient settings for free tier
+        run_input = {
+            "startUrls": [{"url": seed_url}],
+            "crawlerType": "cheerio",          # Lightweight crawler
+            "maxCrawlPages": min(max_pages, 15),  # Limit pages for memory
+            "maxCrawlDepth": 2,
+            "outputFormats": ["markdown"],
+            "removeCookieWarnings": True,
+            "blockMedia": True,                # Block media to save memory
+            "ignoreCanonicalUrl": True,
+            "maxSessionRotations": 1,
+            "saveScreenshots": False,          # No screenshots on free tier
+            "saveHtmlToFile": False,           # No HTML saving on free tier
+            "agentBrowserNavigationTimeoutSecs": 20,
+        }
+        logger.info("Using Apify free tier optimizations for %s", seed_url)
 
     logger.info("Starting Apify crawl for %s (max %d pages)", seed_url, max_pages)
     run = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: client.actor("apify/website-content-crawler").call(run_input=run_input),
+        lambda: client.actor("apify/website-content-crawler").call(run_input=run_input, memory_mbytes=1024),
     )
 
     run_status = run.status if hasattr(run, "status") else run.get("status")
@@ -409,13 +432,15 @@ async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
                    word_count, url, bool(screenshot_url), bool(html_content))
 
     if not result.pages:
-        # Retry once with playwright:adaptive if cheerio got nothing (JS-heavy site)
-        logger.warning("cheerio returned 0 pages — retrying with playwright:adaptive")
-        run_input["crawlerType"] = "playwright:adaptive"
-        run_input["agentBrowserNavigationTimeoutSecs"] = 30
+        # Retry once with playwright if cheerio got nothing (JS-heavy site)
+        logger.warning("cheerio returned 0 pages — retrying with playwright (basic)")
+        run_input["crawlerType"] = "playwright"  # Basic playwright, not adaptive
+        run_input["saveScreenshots"] = False     # Keep memory usage low
+        run_input["maxCrawlPages"] = min(max_pages, 10)  # Further reduce for playwright
+        run_input["agentBrowserNavigationTimeoutSecs"] = 15
         run2 = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: client.actor("apify/website-content-crawler").call(run_input=run_input),
+            lambda: client.actor("apify/website-content-crawler").call(run_input=run_input, memory_mbytes=1024),
         )
         dataset_id2 = run2.default_dataset_id if hasattr(run2, "default_dataset_id") else run2["defaultDatasetId"]
         items2 = await asyncio.get_event_loop().run_in_executor(
@@ -520,7 +545,7 @@ async def _make_apify_request(actor_name: str, run_input: dict, timeout_seconds:
     # Run the actor
     run = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: client.actor(actor_name).call(run_input=run_input),
+        lambda: client.actor(actor_name).call(run_input=run_input, memory_mbytes=1024),
     )
 
     # Get the dataset results

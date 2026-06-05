@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { getKeywordStats, listKeywords, startKeywordResearch, getJob } from "@/lib/api";
+import { getKeywordStats, listKeywords, startKeywordResearch, getJob, startSerpAnalysis, getSerpAnalysisResults } from "@/lib/api";
 import { isDemoMode } from "@/lib/config";
 
 type Keyword = {
@@ -149,6 +149,7 @@ export default function KeywordsPage() {
   const [starting, setStarting] = useState(false);
   const [seedKeyword, setSeedKeyword] = useState("");
   const [latestJobId, setLatestJobId] = useState<string | null>(null);
+  const [startingSerpAnalysis, setStartingSerpAnalysis] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -219,6 +220,19 @@ export default function KeywordsPage() {
     }
   };
 
+  const handleStartSerpAnalysis = async () => {
+    setStartingSerpAnalysis(true);
+    try {
+      await startSerpAnalysis(brandId);
+      router.push(`/brands/${brandId}/serp-analysis`);
+    } catch (error) {
+      console.error("Failed to start SERP analysis:", error);
+      alert("Failed to start SERP analysis. Make sure you have completed keyword research first.");
+    } finally {
+      setStartingSerpAnalysis(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="stack stack-lg">
@@ -256,51 +270,51 @@ export default function KeywordsPage() {
         <StatusBadge status={researchStatus} />
       </div>
 
-      {/* Research Form */}
-      {researchStatus === "never_run" || researchStatus === "failed" ? (
-        <div className="card">
-          <div className="stack stack-md">
-            <div>
-              <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>🔍 Start Keyword Research</h3>
-              <p className="meta" style={{ marginTop: 4 }}>
-                Enter a seed keyword to discover related keywords, search volumes, and competitive analysis.
-              </p>
-            </div>
-            <div className="row" style={{ gap: 12 }}>
-              <input
-                type="text"
-                placeholder="e.g., artificial intelligence, digital marketing, cloud computing"
-                value={seedKeyword}
-                onChange={(e) => setSeedKeyword(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleStartResearch()}
-                style={{ flex: 1, minWidth: 300 }}
-                disabled={starting}
-              />
-              <button
-                onClick={handleStartResearch}
-                disabled={starting || !seedKeyword.trim()}
-                style={{ 
-                  padding: "8px 20px",
-                  backgroundColor: starting ? "var(--gray-200)" : "var(--accent)",
-                  color: starting ? "var(--gray-500)" : "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  fontWeight: 500,
-                  cursor: starting || !seedKeyword.trim() ? "not-allowed" : "pointer"
-                }}
-              >
-                {starting ? "Starting..." : "Start Research"}
-              </button>
-            </div>
-            {researchStatus === "failed" && (
-              <div className="alert alert-error">
-                <span>❌</span>
-                <span>Previous research failed. Please try again with a different keyword.</span>
-              </div>
-            )}
+      {/* Research Form — always visible so user can start additional searches */}
+      <div className="card">
+        <div className="stack stack-md">
+          <div>
+            <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>🔍 Keyword Research</h3>
+            <p className="meta" style={{ marginTop: 4 }}>
+              Enter a seed keyword to discover related keywords, search volumes, and competitive analysis.
+              {researchStatus === "completed" && " Add more keywords to expand your research."}
+            </p>
           </div>
+          <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              placeholder="e.g., artificial intelligence, digital marketing, cloud computing"
+              value={seedKeyword}
+              onChange={(e) => setSeedKeyword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleStartResearch()}
+              style={{ flex: 1, minWidth: 240 }}
+              disabled={starting || researchStatus === "processing"}
+            />
+            <button
+              onClick={handleStartResearch}
+              disabled={starting || !seedKeyword.trim() || researchStatus === "processing"}
+              style={{ 
+                padding: "8px 20px",
+                backgroundColor: starting || !seedKeyword.trim() || researchStatus === "processing" ? "var(--gray-200)" : "var(--accent)",
+                color: starting || !seedKeyword.trim() || researchStatus === "processing" ? "var(--gray-500)" : "white",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 500,
+                cursor: starting || !seedKeyword.trim() || researchStatus === "processing" ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap"
+              }}
+            >
+              {starting ? "Starting..." : "Start Research"}
+            </button>
+          </div>
+          {researchStatus === "failed" && (
+            <div className="alert alert-error">
+              <span>❌</span>
+              <span>Previous research failed. Please try again with a different keyword.</span>
+            </div>
+          )}
         </div>
-      ) : null}
+      </div>
 
       {/* Processing Status */}
       {researchStatus === "processing" && (
@@ -363,17 +377,20 @@ export default function KeywordsPage() {
               <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>🏆 Discovered Keywords</h3>
                 <button
-                  onClick={() => setSeedKeyword("")}
+                  onClick={handleStartSerpAnalysis}
+                  disabled={startingSerpAnalysis}
                   style={{ 
-                    padding: "6px 12px",
-                    backgroundColor: "transparent",
-                    border: "1px solid var(--border)",
+                    padding: "6px 16px",
+                    backgroundColor: startingSerpAnalysis ? "var(--gray-200)" : "var(--accent)",
+                    color: startingSerpAnalysis ? "var(--gray-500)" : "white",
+                    border: "none",
                     borderRadius: "6px",
                     fontSize: "0.875rem",
-                    cursor: "pointer"
+                    fontWeight: 500,
+                    cursor: startingSerpAnalysis ? "not-allowed" : "pointer"
                   }}
                 >
-                  + New Research
+                  {startingSerpAnalysis ? "Starting..." : "🔍 Start SERP Analysis"}
                 </button>
               </div>
 

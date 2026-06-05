@@ -11,4 +11,5 @@ OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
 PYTHONPATH=backend:. \
 backend/venv/bin/rq worker \
   --with-scheduler \
-  onboarding blog purge keyword_research default
+  --worker-ttl 1800 \
+  onboarding blog purge keyword_research serp_analysis content_generation default

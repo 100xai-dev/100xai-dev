@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # TOKEN_ENCRYPTION_KEYRING='{"v1": "...", "v2": "..."}' with active = token_encryption_key_id.
     token_encryption_keyring: str | None = None
     openrouter_api_key: str | None = None
-    extraction_model: str = "anthropic/claude-3-5-sonnet"
+    extraction_model: str = "anthropic/claude-haiku-4-5-20251001"
     extraction_model_fallback: str = "openai/gpt-4o"
     openai_api_key: str | None = None
     embedding_model: str = "text-embedding-3-small"
@@ -35,13 +35,19 @@ class Settings(BaseSettings):
     pinecone_index_name: str = "100xai-brand-knowledge"
     s3_bucket: str = "100xai-uploads"
     crawler_user_agent: str = "100xAI-Crawler/1.0 (+https://100xai.example/bot)"
-    crawler_max_pages: int = 12
+    crawler_max_pages: int = 20
     crawler_page_timeout_sec: int = 20
     crawler_host_delay_sec: int = 1
     apify_api_key: str | None = None
+    apify_premium_features: bool = False  # Enable screenshots/HTML saving for paid plans
     dataforseo_login: str | None = None
     dataforseo_password: str | None = None
-    blog_model: str = "anthropic/claude-3-5-sonnet-20241022"
+    dataforseo_api_key: str | None = None  # alternative: "login:password" combined
+    serpapi_api_key: str | None = None  # SerpApi API key for SERP data
+    anthropic_api_key: str | None = None
+    leonardo_api_key: str | None = None
+    placid_api_key: str | None = None
+    blog_model: str = "anthropic/claude-haiku-4-5-20251001"
     blog_section_max_tokens: int = 2000
     blog_brief_max_tokens: int = 3000
 

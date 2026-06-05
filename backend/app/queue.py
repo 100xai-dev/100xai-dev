@@ -21,5 +21,7 @@ def get_redis() -> Any:
 def get_queue(name: str) -> Any:
     from rq import Queue
 
-    return Queue(name=name, connection=get_redis())
+    # Set a default job timeout of 20 minutes (1200 seconds)
+    # Individual jobs can override this with their own timeout
+    return Queue(name=name, connection=get_redis(), default_timeout=1200)
 

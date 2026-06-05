@@ -19,7 +19,7 @@ from app.models.keyword import Keyword
 from app.models.onboarding import Brand, Job
 from app.models.serp_analysis import SerpAnalysis, CompetitorAnalysis
 from app.services.seo_research import (
-    fetch_serp_for_analysis,
+    serpapi_fetch_serp_for_analysis,
     crawl_competitor_page,
     analyze_competitor_content,
     run_serp_analysis
@@ -89,7 +89,7 @@ async def test_serp_fetch():
     print(f"Fetching SERP for: {keyword}")
     
     try:
-        serp_data = await fetch_serp_for_analysis(keyword, "India", "English")
+        serp_data = await serpapi_fetch_serp_for_analysis(keyword, "India", "English")
         
         if serp_data:
             organic_results = serp_data.get("organic", [])

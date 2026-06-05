@@ -3,6 +3,7 @@ from app import queue
 BLOG_QUEUE = "blog"
 KEYWORD_RESEARCH_QUEUE = "keyword_research"
 SERP_ANALYSIS_QUEUE = "serp_analysis"
+CONTENT_GENERATION_QUEUE = "content_generation"
 
 
 class JobDispatcher:
@@ -60,6 +61,7 @@ class JobDispatcher:
                 "business_description": business_description,
             },
             job_id=f"keyword_research_{job_id}",
+            job_timeout=600,  # 10 minutes — covers Apify calls + AI filtering
             retry=retry,
         )
 
@@ -83,6 +85,27 @@ class JobDispatcher:
                 "brand_profile": brand_profile,
             },
             job_id=f"serp_analysis_{job_id}",
+            job_timeout=900,  # 15 minutes — covers SerpAPI + 3 keywords × 3 Apify crawls + AI analysis
+            retry=retry,
+        )
+
+    def enqueue_content_generation(
+        self,
+        *,
+        job_id: str,
+        brand_id: str,
+        keyword: str,
+        serp_analysis_job_id: str | None = None,
+        max_retries: int = 1
+    ) -> None:
+        """Enqueue Pipeline 3: Content Generation task."""
+        retry = _maybe_retry(max_retries)
+        queue.get_queue(CONTENT_GENERATION_QUEUE).enqueue(
+            "worker.tasks.content_generation.run_content_generation_pipeline_task",
+            kwargs={
+                "job_id": job_id,
+            },
+            job_id=f"content_gen_{job_id}",
             retry=retry,
         )
 

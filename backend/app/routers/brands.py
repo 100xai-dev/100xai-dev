@@ -266,13 +266,23 @@ def start_keyword_research(
     # Enqueue the keyword research job
     from app.services.job_dispatcher import JobDispatcher
     dispatcher = JobDispatcher()
-    dispatcher.enqueue_keyword_research(
-        job_id=job.id,
-        brand_id=brand_id,
-        primary_keyword=payload.seed_keyword,
-        brand_context=brand_context,
-        business_description=business_description
-    )
+    try:
+        dispatcher.enqueue_keyword_research(
+            job_id=job.id,
+            brand_id=brand_id,
+            primary_keyword=payload.seed_keyword,
+            brand_context=brand_context,
+            business_description=business_description
+        )
+    except Exception as e:
+        # Update job status to failed if enqueue fails
+        job.status = "FAILED"
+        job.error_message = f"Failed to enqueue job: {str(e)}"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start keyword research: {str(e)}"
+        )
     
     return KeywordResearchResponse(
         job_id=job.id,
@@ -398,3 +408,218 @@ def get_keyword_stats(
         top_sources=source_counts,
         completion_rate=completion_rate
     )
+
+
+# ---------------------------------------------------------------------------
+# SERP Analysis Endpoints (Pipeline 2)
+# ---------------------------------------------------------------------------
+
+@router.post("/{brand_id}/serp-analysis")
+def start_serp_analysis(
+    brand_id: str,
+    payload: dict = {},
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Start SERP analysis for a brand's keywords."""
+    require_role(current_user.role, {"admin", "team_member"})
+    
+    # Verify brand exists and user has access
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    
+    # Get target keywords - only keywords that don't already have SERP analysis
+    from app.models.serp_analysis import SerpAnalysis
+    
+    # Find keywords that already have SERP analysis
+    analyzed_keyword_texts = db.query(SerpAnalysis.keyword_text).filter(
+        SerpAnalysis.brand_id == brand_id,
+        SerpAnalysis.status == "COMPLETED"
+    ).subquery()
+    
+    # Get top 5 keywords that haven't been analyzed yet
+    keywords = db.query(Keyword).filter(
+        Keyword.brand_id == brand_id,
+        ~Keyword.related_keyword.in_(analyzed_keyword_texts)
+    ).order_by(Keyword.score.desc().nullslast()).limit(5).all()
+    
+    if not keywords:
+        # Check if there are any keywords at all for this brand
+        total_keywords = db.query(Keyword).filter(Keyword.brand_id == brand_id).count()
+        if total_keywords == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="No keywords found. Please run keyword research first."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="All keywords have already been analyzed. Run new keyword research to analyze more keywords."
+            )
+    
+    target_keywords = [k.related_keyword for k in keywords]
+    
+    # Create SERP analysis job
+    job = Job(
+        brand_id=brand_id,
+        org_id=current_user.org_id,
+        job_type="serp_analysis",
+        status="QUEUED",
+        stage="KEYWORD"
+    )
+    db.add(job)
+    db.flush()
+    
+    try:
+        # Enqueue SERP analysis job
+        from app.services.job_dispatcher import JobDispatcher
+        dispatcher = JobDispatcher()
+        dispatcher.enqueue_serp_analysis(
+            job_id=job.id,
+            brand_id=brand_id,
+            target_keywords=target_keywords
+        )
+        
+        job.status = "QUEUED"
+        db.commit()
+        
+        return {
+            "job_id": job.id,
+            "brand_id": brand_id,
+            "keywords_count": len(target_keywords),
+            "status": "queued",
+            "message": f"SERP analysis started for {len(target_keywords)} keywords"
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.exception("Failed to enqueue SERP analysis job")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start SERP analysis: {str(e)}"
+        )
+
+
+@router.get("/{brand_id}/serp-analysis")
+def get_serp_analysis_results(
+    brand_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get SERP analysis results for a brand."""
+    require_role(current_user.role, {"admin", "team_member"})
+    
+    # Verify brand exists and user has access
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    
+    from app.models.serp_analysis import SerpAnalysis, CompetitorAnalysis
+    
+    # Get SERP analyses for this brand
+    serp_analyses = db.query(SerpAnalysis).filter(
+        SerpAnalysis.brand_id == brand_id
+    ).order_by(SerpAnalysis.created_at.desc()).all()
+    
+    # Get latest job status
+    latest_job = db.query(Job).filter(
+        Job.brand_id == brand_id,
+        Job.job_type == "serp_analysis"
+    ).order_by(Job.created_at.desc()).first()
+    
+    # Format results
+    results = []
+    for analysis in serp_analyses:
+        competitors = db.query(CompetitorAnalysis).filter(
+            CompetitorAnalysis.serp_analysis_id == analysis.id
+        ).all()
+        
+        results.append({
+            "id": analysis.id,
+            "keyword_text": analysis.keyword_text,
+            "status": analysis.status,
+            "total_results_analyzed": analysis.total_results_analyzed,
+            "avg_word_count": analysis.avg_word_count,
+            "content_gap_score": analysis.content_gap_score,
+            "created_at": analysis.created_at.isoformat(),
+            "competitors": [{
+                "url": comp.url,
+                "title": comp.title,
+                "content_strength": comp.content_strength,
+                "content_gaps": comp.content_gaps or [],
+                "competitive_advantage": comp.competitive_advantage,
+            } for comp in competitors]
+        })
+    
+    return {
+        "serp_analyses": results,
+        "total_analyses": len(results),
+        "latest_job_id": latest_job.id if latest_job else None,
+        "analysis_status": latest_job.status.lower() if latest_job else "never_run"
+    }
+
+
+@router.get("/{brand_id}/pipeline-status")
+def get_pipeline_status(
+    brand_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Get complete pipeline status for Pipeline 1→2→3 workflow monitoring"""
+    require_role(current_user.role, {"admin", "team_member"})
+
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    # Get pipeline jobs
+    pipeline_jobs = db.query(Job).filter(
+        Job.brand_id == brand_id,
+        Job.job_type.in_(["keyword_research", "serp_analysis", "content_generation"])
+    ).order_by(Job.created_at.desc()).limit(10).all()
+
+    # Group by pipeline stage
+    jobs_by_type = {}
+    auto_trigger_stats = {"successful": 0, "failed": 0, "skipped": 0}
+    
+    for job in pipeline_jobs:
+        if job.job_type not in jobs_by_type:
+            jobs_by_type[job.job_type] = []
+        
+        job_data = {
+            "id": job.id,
+            "status": job.status,
+            "stage": job.stage,
+            "created_at": job.created_at,
+            "auto_triggered": job.input_payload.get("auto_triggered") if job.input_payload else False,
+            "auto_triggered_from": job.input_payload.get("serp_analysis_job_id") if job.input_payload else None,
+        }
+        
+        # Track auto-trigger statistics
+        if job.output_payload:
+            if job.output_payload.get("auto_triggered_content_job"):
+                auto_trigger_stats["successful"] += 1
+            elif job.output_payload.get("auto_trigger_error"):
+                auto_trigger_stats["failed"] += 1
+            elif job.output_payload.get("auto_trigger_skipped"):
+                auto_trigger_stats["skipped"] += 1
+        
+        jobs_by_type[job.job_type].append(job_data)
+
+    # Get keyword count
+    keyword_count = db.query(Keyword).filter(Keyword.brand_id == brand_id).count()
+
+    return {
+        "brand_id": brand_id,
+        "brand_name": brand.name,
+        "keyword_count": keyword_count,
+        "pipeline_status": {
+            "pipeline_1_keyword_research": jobs_by_type.get("keyword_research", []),
+            "pipeline_2_serp_analysis": jobs_by_type.get("serp_analysis", []),
+            "pipeline_3_content_generation": jobs_by_type.get("content_generation", []),
+        },
+        "auto_trigger_stats": auto_trigger_stats,
+        "auto_trigger_enabled": True,
+        "last_updated": max([job.created_at for job in pipeline_jobs]) if pipeline_jobs else None
+    }
