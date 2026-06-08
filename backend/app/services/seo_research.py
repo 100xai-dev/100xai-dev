@@ -324,177 +324,34 @@ async def fetch_search_volume(keywords: list[str], location_name: str, language_
 # Pipeline 1: Apify Google Search Scraper Integration
 # ---------------------------------------------------------------------------
 
-async def fetch_apify_keyword_suggestions(seed: KeywordSeed, limit: int = 50) -> list[dict]:
-    """Fetch keyword suggestions using Apify Google Search Scraper."""
-    from app.config import get_settings
-    from app.services.crawler import _make_apify_request
-    
-    settings = get_settings()
-    if not settings.apify_api_key:
-        logger.warning("Apify API key not set - skipping Apify keyword suggestions")
-        return []
-    
-    # Configure search for related suggestions
-    search_input = {
-        "queries": seed.keyword,
-        "maxPagesPerQuery": 1,
-        "resultsPerPage": limit,
-        "mobileResults": False,
-        "countryCode": "in" if seed.location_name == "India" else "us",
-        "languageCode": "en",
-        "saveHtml": False,
-        "saveScreenshots": False,
-        "includeUnfilteredResults": True,
-    }
-    
-    try:
-        result = await _make_apify_request(
-            actor_name="apify/google-search-scraper",
-            run_input=search_input,
-            timeout_seconds=90
-        )
-        
-        if not result or not result.get("items"):
-            logger.warning("No results from Apify Google Search Scraper")
-            return []
-        
-        # Extract related search queries and people also ask
-        suggestions = []
-        
-        for item in result["items"]:
-            # Get related searches
-            related_searches = item.get("relatedQueries", [])
-            for related in related_searches:
-                if isinstance(related, dict):
-                    query = related.get("query", "")
-                else:
-                    query = str(related)
-                    
-                if query and query.lower() != seed.keyword.lower():
-                    suggestions.append({
-                        "keyword": query.strip(),
-                        "source": "related_searches"
-                    })
-            
-            # Get people also ask questions
-            people_also_ask = item.get("peopleAlsoAsk", [])
-            for paa in people_also_ask:
-                question = paa.get("question", "") if isinstance(paa, dict) else str(paa)
-                if question:
-                    suggestions.append({
-                        "keyword": question.strip(),
-                        "source": "people_also_ask"
-                    })
-            
-            # Extract queries from organic results titles (for more suggestions)
-            organic_results = item.get("organicResults", [])
-            for organic in organic_results[:10]:  # Top 10 only
-                title = organic.get("title", "")
-                if title:
-                    # Extract potential keywords from titles
-                    title_words = title.lower().split()
-                    if len(title_words) >= 2 and len(title_words) <= 5:
-                        # Create keyword phrases from titles
-                        potential_keyword = " ".join(title_words[:4])
-                        if (seed.keyword.lower() in potential_keyword or 
-                            any(word in potential_keyword for word in seed.keyword.lower().split())):
-                            suggestions.append({
-                                "keyword": potential_keyword.strip(),
-                                "source": "title_extraction"
-                            })
-        
-        # Deduplicate and limit results
-        seen_keywords = set()
-        unique_suggestions = []
-        for suggestion in suggestions:
-            keyword = suggestion["keyword"].lower()
-            if keyword not in seen_keywords and len(keyword) <= 100:  # Reasonable length limit
-                seen_keywords.add(keyword)
-                unique_suggestions.append(suggestion)
-                if len(unique_suggestions) >= limit:
-                    break
-        
-        logger.info(f"Apify Google Search Scraper returned {len(unique_suggestions)} keyword suggestions for '{seed.keyword}'")
-        return unique_suggestions
-        
-    except Exception as exc:
-        logger.error(f"Apify keyword suggestions failed for '{seed.keyword}': {exc}")
-        return []
-
-
-async def fetch_apify_autocomplete_suggestions(seed: KeywordSeed) -> list[dict]:
-    """Fetch autocomplete suggestions by scraping Google's autocomplete via Apify."""
-    from app.config import get_settings
-    from app.services.crawler import _make_apify_request
-    
-    settings = get_settings()
-    if not settings.apify_api_key:
-        logger.warning("Apify API key not set - skipping Apify autocomplete suggestions")
-        return []
-    
+async def fetch_serp_keyword_suggestions(seed: KeywordSeed, limit: int = 50) -> list[dict]:
+    """
+    Fetch related keyword suggestions via SerpAPI related searches + People Also Ask.
+    Replaces the former Apify google-search-scraper call.
+    """
+    raw = await serpapi_fetch_related_keywords(seed, limit=limit)
     suggestions = []
-    
-    # Try different autocomplete variations
-    autocomplete_queries = [
-        seed.keyword,
-        f"{seed.keyword} how to",
-        f"{seed.keyword} tips",
-        f"{seed.keyword} guide", 
-        f"best {seed.keyword}",
-        f"{seed.keyword} for"
-    ]
-    
-    for base_query in autocomplete_queries[:3]:  # Limit to avoid too many API calls
-        search_input = {
-            "queries": base_query,
-            "maxPagesPerQuery": 1,
-            "resultsPerPage": 10,
-            "mobileResults": False,
-            "countryCode": "in" if seed.location_name == "India" else "us",
-            "languageCode": "en",
-            "saveHtml": False,
-            "saveScreenshots": False,
-            "includeUnfilteredResults": True,
-        }
-        
-        try:
-            result = await _make_apify_request(
-                actor_name="apify/google-search-scraper",
-                run_input=search_input,
-                timeout_seconds=60
-            )
-            
-            if result and result.get("items"):
-                for item in result["items"]:
-                    # Extract autocomplete suggestions if available
-                    autocomplete = item.get("searchQuery", {}).get("autocomplete", [])
-                    for suggestion in autocomplete:
-                        if isinstance(suggestion, dict):
-                            query = suggestion.get("query", "")
-                        else:
-                            query = str(suggestion)
-                        
-                        if query and query.lower() != base_query.lower():
-                            suggestions.append({
-                                "keyword": query.strip(),
-                                "source": "apify_autocomplete"
-                            })
-            
-        except Exception as exc:
-            logger.warning(f"Apify autocomplete failed for '{base_query}': {exc}")
-            continue
-    
-    # Deduplicate
-    seen_keywords = set()
-    unique_suggestions = []
-    for suggestion in suggestions:
-        keyword = suggestion["keyword"].lower()
-        if keyword not in seen_keywords:
-            seen_keywords.add(keyword)
-            unique_suggestions.append(suggestion)
-    
-    logger.info(f"Apify autocomplete returned {len(unique_suggestions)} suggestions for '{seed.keyword}'")
-    return unique_suggestions
+    for item in raw:
+        kw = item.get("keyword", "")
+        if kw and kw.lower() != seed.keyword.lower():
+            suggestions.append({"keyword": kw.strip(), "source": "serp_related"})
+    logger.info("SerpAPI returned %d keyword suggestions for '%s'", len(suggestions), seed.keyword)
+    return suggestions
+
+
+async def fetch_serp_autocomplete_suggestions(seed: KeywordSeed) -> list[dict]:
+    """
+    Fetch autocomplete suggestions via SerpAPI.
+    Replaces the former Apify google-search-scraper autocomplete call.
+    """
+    raw = await serpapi_fetch_autocomplete_keywords(seed)
+    suggestions = []
+    for item in raw:
+        value = item.get("value", "") if isinstance(item, dict) else str(item)
+        if value and value.lower() != seed.keyword.lower():
+            suggestions.append({"keyword": value.strip(), "source": "serp_autocomplete"})
+    logger.info("SerpAPI autocomplete returned %d suggestions for '%s'", len(suggestions), seed.keyword)
+    return suggestions
 
 
 # ---------------------------------------------------------------------------
@@ -508,9 +365,10 @@ def normalize_all(keywords: list[dict], primary_keyword: str, source_type: str) 
     for item in keywords:
         # Extract keyword text from different API response formats
         keyword_text = (
-            item.get("keyword") or 
+            item.get("keyword") or
             item.get("keyword_data", {}).get("keyword") or
             item.get("suggestion") or
+            item.get("value") or
             ""
         ).strip().lower()
         
@@ -1021,16 +879,16 @@ async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str,
         seed = KeywordSeed(keyword=primary_keyword, location_name="India", language_name="English")
         all_keywords = []
         
-        # Step 1: Fetch keywords from multiple sources (prioritizing Apify for suggestions)
-        logger.info("Fetching keyword suggestions from Apify Google Search Scraper...")
-        apify_suggestions = await fetch_apify_keyword_suggestions(seed)
-        all_keywords.extend(normalize_all(apify_suggestions, primary_keyword, "apify_suggestions"))
-        
-        logger.info("Fetching autocomplete suggestions from Apify...")
-        apify_autocomplete = await fetch_apify_autocomplete_suggestions(seed)
-        all_keywords.extend(normalize_all(apify_autocomplete, primary_keyword, "apify_autocomplete"))
-        
-        # Fallback to DataForSEO if Apify didn't return enough keywords
+        # Step 1: Fetch keywords from multiple sources
+        logger.info("Fetching keyword suggestions via SerpAPI related searches...")
+        serp_suggestions = await fetch_serp_keyword_suggestions(seed)
+        all_keywords.extend(normalize_all(serp_suggestions, primary_keyword, "serp_suggestions"))
+
+        logger.info("Fetching autocomplete suggestions via SerpAPI...")
+        serp_autocomplete = await fetch_serp_autocomplete_suggestions(seed)
+        all_keywords.extend(normalize_all(serp_autocomplete, primary_keyword, "serp_autocomplete"))
+
+        # Supplement with DataForSEO if SerpAPI didn't return enough keywords
         if len(all_keywords) < 20:
             logger.info("Supplementing with DataForSEO keyword suggestions...")
             suggestions = await fetch_keyword_suggestions(seed)
@@ -1048,6 +906,18 @@ async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str,
         sub_topics = await fetch_sub_topics(primary_keyword)
         sub_topic_keywords = [{"keyword": topic} for topic in sub_topics]
         all_keywords.extend(normalize_all(sub_topic_keywords, primary_keyword, "sub_topics"))
+        
+        # Add the primary keyword itself to the list (so user sees what they searched for)
+        primary_keyword_entry = {
+            "related_keyword": primary_keyword.lower().strip(),
+            "primary_keyword": primary_keyword.lower().strip(),
+            "source_type": "primary_search",
+            "search_volume": None,  # Will be enriched later
+            "keyword_difficulty": None,
+            "cpc": None,
+            "competition": None,
+        }
+        all_keywords.insert(0, primary_keyword_entry)  # Add at the beginning
         
         logger.info(f"Collected {len(all_keywords)} total keywords from all sources")
         
@@ -1216,105 +1086,56 @@ async def fetch_serp_for_analysis(keyword: str, location_name: str = "India", la
 
 async def crawl_competitor_page(url: str) -> dict:
     """
-    Crawl a competitor page using Apify for content analysis.
-    
-    Args:
-        url: The competitor page URL to crawl
-        
+    Scrape a single competitor page using Firecrawl for content analysis.
+
     Returns:
-        dict with crawl results: {content: str, word_count: int, success: bool, error: str}
+        dict: {content, word_count, success, error, load_time_ms, mobile_friendly}
     """
     from app.config import get_settings
-    from app.services.crawler import _make_apify_request  # Reuse existing Apify infrastructure
-    
+    from app.services.crawler import CrawlError, scrape_page_with_firecrawl
+
     settings = get_settings()
-    if not settings.apify_api_key:
-        logger.warning("Apify token not set - skipping competitor page crawl")
-        return {
-            "content": None,
-            "word_count": 0,
-            "success": False,
-            "error": "Apify token not configured",
-            "load_time_ms": None,
-            "mobile_friendly": None
-        }
-    
-    # Configure for memory-efficient single page crawl
-    crawl_input = {
-        "startUrls": [{"url": url}],
-        "crawlerType": "cheerio",  # Use lightweight HTML parsing instead of browser
-        "maxRequestsPerCrawl": 1,  # Single page only — CRITICAL: prevents crawling entire site
-        "maxCrawlDepth": 0,        # CRITICAL: do not follow any links on the page
-        "maxCrawlPages": 1,        # Belt-and-suspenders: hard cap at 1 page
-        "maxSessionRotations": 1,
-        "removeElementsCssSelector": "nav, footer, header, .ads, .sidebar, .navigation, script, style, .menu, .breadcrumb",
-        "outputFormats": ["markdown"],
-        "saveScreenshots": False,
-        "saveHtmlToFile": False,
-        "requestTimeout": 15000,
-        "pageTimeout": 15000,
-        "maxConcurrency": 1,
-        "proxyConfiguration": {"useApifyProxy": True},
-        "blockAds": True,
-        "ignoreRobotsTxt": False,
-        "userAgent": "100xAI-ContentAnalyzer/1.0"
-    }
-    
+    if not settings.firecrawl_api_key:
+        logger.warning("FIRECRAWL_API_KEY not set — using HTTP fallback for competitor crawl")
+        return await _simple_http_fallback(url)
+
     try:
-        # Use the same Apify actor as the main crawler
-        result = await _make_apify_request(
-            actor_name="apify/website-content-crawler",
-            run_input=crawl_input,
-            timeout_seconds=30  # Further reduced timeout for faster processing
-        )
-        
-        if not result or not result.get("items"):
-            # Fallback to simple HTTP request for basic content
-            logger.warning(f"Apify crawl failed for {url}, trying simple HTTP fallback")
+        result = await scrape_page_with_firecrawl(url, timeout_ms=30000)
+
+        markdown = result.get("markdown", "")
+        meta = result.get("metadata", {})
+
+        if not markdown or len(markdown.strip()) < 100:
+            logger.warning("Firecrawl returned empty content for %s, trying HTTP fallback", url)
             return await _simple_http_fallback(url)
-        
-        item = result["items"][0]
-        markdown_content = item.get("markdown", "")
-        
-        if not markdown_content or len(markdown_content.strip()) < 100:
-            return {
-                "content": None,
-                "word_count": 0,
-                "success": False,
-                "error": "Content too short or empty",
-                "load_time_ms": item.get("loadTime"),
-                "mobile_friendly": None
-            }
-        
-        # Calculate word count (approximate)
-        word_count = len(markdown_content.split())
-        
-        # Check if meets quality threshold
+
+        word_count = len(markdown.split())
+
         if word_count < 400:
             return {
-                "content": markdown_content,
+                "content": markdown,
                 "word_count": word_count,
                 "success": False,
                 "error": f"Content too short: {word_count} words (minimum 400)",
-                "load_time_ms": item.get("loadTime"),
-                "mobile_friendly": None
+                "load_time_ms": None,
+                "mobile_friendly": None,
             }
-        
+
         return {
-            "content": markdown_content,
+            "content": markdown,
             "word_count": word_count,
             "success": True,
             "error": None,
-            "load_time_ms": item.get("loadTime"),
-            "mobile_friendly": True,  # Apify handles mobile rendering
-            "crawled_title": item.get("title"),
-            "crawled_meta_description": item.get("description")
+            "load_time_ms": None,
+            "mobile_friendly": True,
+            "crawled_title": meta.get("title"),
+            "crawled_meta_description": meta.get("description"),
         }
-        
+
+    except CrawlError:
+        raise
     except Exception as exc:
-        logger.error(f"Apify competitor crawl failed for {url}: {exc}")
-        # Try simple HTTP fallback
-        logger.info(f"Attempting simple HTTP fallback for {url}")
+        logger.error("Firecrawl competitor scrape failed for %s: %s", url, exc)
         return await _simple_http_fallback(url)
 
 

@@ -129,7 +129,8 @@ export interface BrandCreateResponse {
 }
 
 export interface DeleteBrandResponse {
-  job_id: string;
+  deleted: boolean;
+  brand_id: string;
 }
 
 export interface BrandProfileContent {

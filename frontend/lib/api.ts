@@ -33,9 +33,10 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     const token = cookieStore.get("100xai_access_token")?.value;
     if (token) headers.Authorization = `Bearer ${token}`;
   } else {
-    // Client: call backend directly with token from localStorage (avoids proxy cookie timing issues)
     url = `${getBackendBaseUrl()}${path}`;
-    const token = localStorage.getItem("100xai_access_token");
+    // Use getValidAccessToken so expired tokens are refreshed before the call
+    const { getValidAccessToken } = await import("@/lib/auth");
+    const token = await getValidAccessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
   const response = await fetch(url, {
@@ -52,11 +53,15 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
         detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
       }
     } catch {
-      // no-op fallback to status text
+      // no-op: body may be empty (e.g. 404 from proxy)
     }
     throw new Error(detail);
   }
-  return (await response.json()) as T;
+  // 204 No Content has no body — return null cast to T
+  if (response.status === 204) return null as unknown as T;
+  const text = await response.text();
+  if (!text) return null as unknown as T;
+  return JSON.parse(text) as T;
 }
 
 export async function listBrands(): Promise<BrandListResponse> {

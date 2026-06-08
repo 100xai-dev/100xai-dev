@@ -32,11 +32,17 @@ export default function BlogJobPage() {
   const [selectedTitle, setSelectedTitle] = useState("");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const selectedTitleRef = useRef(selectedTitle);
+  selectedTitleRef.current = selectedTitle;
+
   const fetchJob = useCallback(async () => {
     try {
       const data = await getBlogJob(brandId, jobId);
       setJob(data);
-      if (data.brief?.selected_title && !selectedTitle) {
+      // Only set selectedTitle once when the brief first arrives — use ref to avoid
+      // making selectedTitle a dep of fetchJob (which would restart the interval on every
+      // title radio-button click).
+      if (data.brief?.selected_title && !selectedTitleRef.current) {
         setSelectedTitle(data.brief.selected_title);
       }
     } catch {
@@ -44,28 +50,60 @@ export default function BlogJobPage() {
     } finally {
       setLoading(false);
     }
-  }, [brandId, jobId, selectedTitle]);
+  }, [brandId, jobId]); // ← selectedTitle intentionally removed from deps
 
   useEffect(() => {
     void fetchJob();
+
+    // Poll every 3 s while the job is in an active state.
+    // Call fetchJob directly from the interval — don't use setState as a side-effect trigger.
     intervalRef.current = setInterval(() => {
       setJob((prev) => {
         if (prev && ACTIVE.has(prev.status)) {
           void fetchJob();
-        } else if (intervalRef.current) {
-          clearInterval(intervalRef.current);
+        } else {
+          clearInterval(intervalRef.current!);
+          intervalRef.current = null;
         }
-        return prev;
+        return prev; // keep state unchanged; fetchJob's own setJob will update it
       });
     }, 3000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [fetchJob]);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [fetchJob]); // fetchJob is now stable (no selectedTitle dep) → effect runs once
 
   async function act(fn: () => Promise<BlogJobOut>) {
     setActing(true); setError("");
-    try { setJob(await fn()); } catch (e) { setError(e instanceof Error ? e.message : "Action failed"); }
-    finally { setActing(false); }
+    try {
+      const updated = await fn();
+      setJob(updated);
+      // If the action moved the job into an ACTIVE state, restart polling
+      if (ACTIVE.has(updated.status)) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = setInterval(() => {
+          setJob((prev) => {
+            if (prev && ACTIVE.has(prev.status)) {
+              void fetchJob();
+            } else {
+              clearInterval(intervalRef.current!);
+              intervalRef.current = null;
+            }
+            return prev;
+          });
+        }, 3000);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setActing(false);
+    }
   }
+
 
   if (loading) return <div className="card meta">Loading...</div>;
   if (!job) return <div className="card meta" style={{ color: "var(--danger)" }}>{error || "Not found"}</div>;

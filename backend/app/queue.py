@@ -8,6 +8,7 @@ PURGE_QUEUE = "purge"
 BLOG_QUEUE = "blog"
 KEYWORD_RESEARCH_QUEUE = "keyword_research"
 SERP_ANALYSIS_QUEUE = "serp_analysis"
+PUBLISHER_QUEUE = "publisher"
 
 
 @lru_cache(maxsize=1)

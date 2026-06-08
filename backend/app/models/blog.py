@@ -46,6 +46,7 @@ class BlogJob(Base, TimestampMixin):
     brief: Mapped[BlogBrief | None] = relationship(back_populates="job", cascade="all, delete-orphan", uselist=False)
     sections: Mapped[list[BlogSection]] = relationship(back_populates="job", cascade="all, delete-orphan", order_by="BlogSection.section_index")
     draft: Mapped[BlogDraft | None] = relationship(back_populates="job", cascade="all, delete-orphan", uselist=False)
+    schedules: Mapped[list["BlogSchedule"]] = relationship("BlogSchedule", back_populates="blog_job")
 
 
 class BlogBrief(Base, TimestampMixin):
@@ -109,3 +110,4 @@ class BlogDraft(Base, TimestampMixin):
     approved_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
 
     job: Mapped[BlogJob] = relationship(back_populates="draft")
+    schedules: Mapped[list["BlogSchedule"]] = relationship("BlogSchedule", back_populates="blog_draft")

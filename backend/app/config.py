@@ -38,8 +38,7 @@ class Settings(BaseSettings):
     crawler_max_pages: int = 20
     crawler_page_timeout_sec: int = 20
     crawler_host_delay_sec: int = 1
-    apify_api_key: str | None = None
-    apify_premium_features: bool = False  # Enable screenshots/HTML saving for paid plans
+    firecrawl_api_key: str | None = None
     dataforseo_login: str | None = None
     dataforseo_password: str | None = None
     dataforseo_api_key: str | None = None  # alternative: "login:password" combined

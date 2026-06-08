@@ -4,6 +4,7 @@ BLOG_QUEUE = "blog"
 KEYWORD_RESEARCH_QUEUE = "keyword_research"
 SERP_ANALYSIS_QUEUE = "serp_analysis"
 CONTENT_GENERATION_QUEUE = "content_generation"
+PUBLISHER_QUEUE = "publisher"
 
 
 class JobDispatcher:
@@ -14,6 +15,7 @@ class JobDispatcher:
             "worker.tasks.blog.run_blog_brief",
             kwargs={"job_id": job_id},
             job_id=f"brief_{job_id}",
+            job_timeout=600,  # 10 minutes — covers SERP fetch + LLM brief generation
         )
 
     def enqueue_blog_write(self, *, job_id: str) -> None:
@@ -21,6 +23,7 @@ class JobDispatcher:
             "worker.tasks.blog.run_blog_write",
             kwargs={"job_id": job_id},
             job_id=f"write_{job_id}",
+            job_timeout=900,  # 15 minutes — covers parallel section writing (3 batches × LLM)
         )
 
     def enqueue_onboarding(self, *, job_id: str, brand_id: str, max_retries: int = 3) -> None:
@@ -107,6 +110,59 @@ class JobDispatcher:
             },
             job_id=f"content_gen_{job_id}",
             retry=retry,
+        )
+
+    def enqueue_publish_blog_at(self, *, schedule_id: str, run_at) -> None:
+        """Schedule a blog auto-publish to fire at ``run_at`` (UTC datetime).
+
+        Uses RQ's scheduler (worker must run with --with-scheduler). Runs on the
+        BLOG_QUEUE, which the worker already listens on.
+        """
+        queue.get_queue(BLOG_QUEUE).enqueue_at(
+            run_at,
+            "worker.tasks.scheduler.publish_scheduled_blog",
+            kwargs={"schedule_id": schedule_id},
+            job_id=f"sched_publish_{schedule_id}",
+            job_timeout=600,
+        )
+
+    def enqueue_publish_schedule(self, *, schedule_id: str, max_retries: int = 2) -> None:
+        """Enqueue publishing task for a schedule."""
+        retry = _maybe_retry(max_retries)
+        queue.get_queue(PUBLISHER_QUEUE).enqueue(
+            "worker.tasks.scheduler.process_publishing_queue",
+            kwargs={"schedule_id": schedule_id},
+            job_id=f"publish_{schedule_id}",
+            job_timeout=600,  # 10 minutes for publishing across channels
+            retry=retry,
+        )
+
+    def enqueue_retry_publishing(self, *, schedule_id: str, max_retries: int = 3) -> None:
+        """Enqueue retry publishing task for a failed schedule."""
+        retry = _maybe_retry(max_retries)
+        queue.get_queue(PUBLISHER_QUEUE).enqueue(
+            "worker.tasks.scheduler.retry_failed_publishing",
+            kwargs={"schedule_id": schedule_id, "max_retries": max_retries},
+            job_id=f"retry_publish_{schedule_id}",
+            job_timeout=600,
+            retry=retry,
+        )
+
+    def enqueue_publishing_scheduler(self) -> None:
+        """Enqueue the main publishing scheduler (called by cron)."""
+        queue.get_queue(PUBLISHER_QUEUE).enqueue(
+            "worker.tasks.scheduler.run_publishing_scheduler",
+            job_id="publishing_scheduler",
+            job_timeout=300,  # 5 minutes
+        )
+
+    def enqueue_cleanup_queue(self, *, days_old: int = 30) -> None:
+        """Enqueue cleanup task for old publishing queue entries."""
+        queue.get_queue(PUBLISHER_QUEUE).enqueue(
+            "worker.tasks.scheduler.cleanup_old_queue_entries",
+            kwargs={"days_old": days_old},
+            job_id="cleanup_publishing_queue",
+            job_timeout=300,
         )
 
 

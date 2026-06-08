@@ -9,6 +9,8 @@ from app.routers.jobs import router as jobs_router
 from app.routers.brand_sources import router as brand_sources_router
 from app.routers.integrations import router as integrations_router
 from app.routers.content_generation import router as content_generation_router
+from app.routers.schedules import router as schedules_router
+from app.routers.publishing import router as publishing_router
 
 app = FastAPI(title="100xAI", version="0.2.0", docs_url="/docs")
 
@@ -72,3 +74,5 @@ app.include_router(jobs_router, prefix="/v1")
 app.include_router(brand_sources_router, prefix="/v1")
 app.include_router(integrations_router, prefix="/v1")
 app.include_router(content_generation_router, prefix="/v1")
+app.include_router(schedules_router)
+app.include_router(publishing_router, prefix="/v1")

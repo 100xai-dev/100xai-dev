@@ -59,14 +59,15 @@ def get_brand_endpoint(
     return _brand_summary(db, brand.id, current_user.org_id)
 
 
-@router.delete("/{brand_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{brand_id}", status_code=status.HTTP_200_OK)
 def delete_brand_endpoint(
     brand_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
-) -> None:
+) -> dict:
     require_role(current_user.role, {"admin"})
     delete_brand_immediately(db, brand_id, current_user)
+    return {"deleted": True, "brand_id": brand_id}
 
 
 @router.post("/{brand_id}/profile", response_model=BrandProfileFull, status_code=status.HTTP_201_CREATED)
@@ -432,30 +433,57 @@ def start_serp_analysis(
     # Get target keywords - only keywords that don't already have SERP analysis
     from app.models.serp_analysis import SerpAnalysis
     
-    # Find keywords that already have SERP analysis
-    analyzed_keyword_texts = db.query(SerpAnalysis.keyword_text).filter(
+    # Get keywords that already have SERP analysis (simplified approach)
+    analyzed_keywords = db.query(SerpAnalysis.keyword_text).filter(
         SerpAnalysis.brand_id == brand_id,
-        SerpAnalysis.status == "COMPLETED"
-    ).subquery()
+        SerpAnalysis.status.in_(["COMPLETED", "PROCESSING", "QUEUED"])  # Include all active/completed analyses
+    ).all()
+    
+    analyzed_keyword_list = [kw.keyword_text for kw in analyzed_keywords]
     
     # Get top 5 keywords that haven't been analyzed yet
-    keywords = db.query(Keyword).filter(
-        Keyword.brand_id == brand_id,
-        ~Keyword.related_keyword.in_(analyzed_keyword_texts)
-    ).order_by(Keyword.score.desc().nullslast()).limit(5).all()
+    if analyzed_keyword_list:
+        keywords = db.query(Keyword).filter(
+            Keyword.brand_id == brand_id,
+            ~Keyword.related_keyword.in_(analyzed_keyword_list)
+        ).order_by(Keyword.score.desc().nullslast()).limit(5).all()
+    else:
+        # No keywords analyzed yet, get top 5
+        keywords = db.query(Keyword).filter(
+            Keyword.brand_id == brand_id
+        ).order_by(Keyword.score.desc().nullslast()).limit(5).all()
     
     if not keywords:
         # Check if there are any keywords at all for this brand
         total_keywords = db.query(Keyword).filter(Keyword.brand_id == brand_id).count()
+        completed_analyses = db.query(SerpAnalysis).filter(
+            SerpAnalysis.brand_id == brand_id,
+            SerpAnalysis.status == "COMPLETED"
+        ).count()
+        
         if total_keywords == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, 
                 detail="No keywords found. Please run keyword research first."
             )
-        else:
+        elif completed_analyses >= total_keywords:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="All keywords have already been analyzed. Run new keyword research to analyze more keywords."
+                detail=f"All {total_keywords} keywords have already been analyzed. Run new keyword research to analyze more keywords."
+            )
+        else:
+            # This shouldn't happen - debug info
+            all_keywords = db.query(Keyword.related_keyword).filter(Keyword.brand_id == brand_id).all()
+            analyzed_keywords = db.query(SerpAnalysis.keyword_text).filter(
+                SerpAnalysis.brand_id == brand_id,
+                SerpAnalysis.status == "COMPLETED"
+            ).all()
+            
+            available_keywords = [kw.related_keyword for kw in all_keywords if kw.related_keyword not in [ak.keyword_text for ak in analyzed_keywords]]
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail=f"Database inconsistency: Found {total_keywords} keywords, {completed_analyses} analyzed. Available: {available_keywords[:3]}..."
             )
     
     target_keywords = [k.related_keyword for k in keywords]

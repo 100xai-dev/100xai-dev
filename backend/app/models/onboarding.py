@@ -25,6 +25,9 @@ class Brand(Base, TimestampMixin):
     integration_accounts: Mapped[list["IntegrationAccount"]] = relationship(
         back_populates="brand", cascade="all, delete-orphan"
     )
+    schedules: Mapped[list["BlogSchedule"]] = relationship(
+        "BlogSchedule", back_populates="brand", cascade="all, delete-orphan"
+    )
 
 
 class BrandProfile(Base, TimestampMixin):

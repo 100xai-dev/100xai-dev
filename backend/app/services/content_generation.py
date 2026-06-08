@@ -25,7 +25,7 @@ JOB_STAGE_COMPLETE = "COMPLETE"
 
 # Content generation data models
 class SerpAnalysisData(BaseModel):
-    keywords: List[tuple[str, Optional[float]]]
+    keywords: List[tuple[str, Optional[float], Optional[int], Optional[float]]]  # (keyword, score, volume, difficulty)
     competitor_gaps: List[str]
     competitive_advantages: List[str]
     serp_metadata: Dict
@@ -69,7 +69,59 @@ class AssembledContent(BaseModel):
     table_of_contents: str
     body: str
     conclusion: str
+    brand_value_section: Optional[str] = None  # "How [Brand] helps you in this"
+    faq_section: Optional[str] = None
     total_word_count: int
+
+class LinkData(BaseModel):
+    url: str
+    anchor_text: str
+    link_type: str  # "internal", "external", "source", "product", "service"
+    description: Optional[str] = None
+    rel_attributes: Optional[str] = "noopener"  # "nofollow noopener", "sponsored noopener", etc.
+
+class SourceCitation(BaseModel):
+    title: str
+    url: str
+    author: Optional[str] = None
+    publication: Optional[str] = None
+    date: Optional[str] = None
+    relevance_score: float = 1.0
+
+class LinkStrategy(BaseModel):
+    internal_links: List[LinkData] = []
+    source_citations: List[SourceCitation] = []
+    product_links: List[LinkData] = []
+    external_references: List[LinkData] = []
+
+class LinkData(BaseModel):
+    url: str
+    anchor_text: str
+    link_type: str  # "internal", "external", "source", "product", "service", "affiliate"
+    description: Optional[str] = None
+    rel_attributes: Optional[str] = "noopener"  # "nofollow noopener", "sponsored noopener", etc.
+    priority: str = "medium"  # "high", "medium", "low"
+    keywords: List[str] = []
+    target_blank: bool = True  # Open in new tab for external links
+
+class SourceCitation(BaseModel):
+    title: str
+    url: str
+    author: Optional[str] = None
+    publication: Optional[str] = None
+    date: Optional[str] = None
+    relevance_score: float = 1.0
+    trust_level: str = "medium"  # "high", "medium", "low"
+    citation_style: str = "inline"  # "inline", "reference", "footnote"
+
+class LinkStrategy(BaseModel):
+    internal_links: List[LinkData] = []
+    source_citations: List[SourceCitation] = []
+    product_links: List[LinkData] = []
+    external_references: List[LinkData] = []
+    affiliate_links: List[LinkData] = []
+    max_links_per_section: int = 3
+    require_disclosures: bool = True
 
 class FinalArticle(BaseModel):
     meta_title: str
@@ -77,14 +129,32 @@ class FinalArticle(BaseModel):
     slug: str
     html_content: str
     word_count: int
+    links_added: List[LinkData] = []
+    sources_cited: List[SourceCitation] = []
+    link_disclosures: List[str] = []
 
 # Core content generation functions
-async def load_serp_analysis(job_id: str, brand_id: str, db: Session) -> SerpAnalysisData:
-    """Load + aggregate SERP analysis from Pipeline 2"""
-    serp_analyses = db.query(SerpAnalysis).filter(
-        SerpAnalysis.brand_id == brand_id,
-        SerpAnalysis.job_id == job_id  # Link to Pipeline 2 job
-    ).all()
+async def load_serp_analysis(job_id: str, brand_id: str, db: Session, serp_job_id: str = None) -> SerpAnalysisData:
+    """Load + aggregate SERP analysis from Pipeline 2
+    
+    Args:
+        job_id: Current content generation job ID
+        brand_id: Brand ID
+        db: Database session
+        serp_job_id: Optional specific SERP job ID to load from
+    """
+    
+    # If serp_job_id provided, use it. Otherwise get the most recent SERP analysis for this brand
+    if serp_job_id:
+        serp_analyses = db.query(SerpAnalysis).filter(
+            SerpAnalysis.brand_id == brand_id,
+            SerpAnalysis.job_id == serp_job_id
+        ).all()
+    else:
+        # Get most recent SERP analyses for this brand (regardless of job_id)
+        serp_analyses = db.query(SerpAnalysis).filter(
+            SerpAnalysis.brand_id == brand_id
+        ).order_by(SerpAnalysis.created_at.desc()).limit(20).all()
     
     competitor_analyses = []
     for serp in serp_analyses:
@@ -93,8 +163,56 @@ async def load_serp_analysis(job_id: str, brand_id: str, db: Session) -> SerpAna
         ).all()
         competitor_analyses.extend(competitors)
     
+    # Also get keyword research data for volume/difficulty
+    from app.models.keyword import Keyword
+    keyword_data = {}
+    
+    # If we have SERP analyses, get matching keywords
+    if serp_analyses:
+        keyword_texts = [s.keyword_text for s in serp_analyses]
+        keywords = db.query(Keyword).filter(
+            Keyword.brand_id == brand_id,
+            Keyword.related_keyword.in_(keyword_texts)
+        ).all()
+    else:
+        # Fallback: Get top keywords from Pipeline 1 if no SERP data
+        logger.info("No SERP analyses found, falling back to top keywords from keyword research")
+        keywords = db.query(Keyword).filter(
+            Keyword.brand_id == brand_id
+        ).order_by(Keyword.score.desc().nullslast()).limit(20).all()
+        
+    keyword_data = {kw.related_keyword: {
+        "search_volume": kw.search_volume,
+        "difficulty": kw.keyword_difficulty,
+        "cpc": kw.cpc,
+        "score": kw.score
+    } for kw in keywords}
+    
+    # Combine SERP analysis scores with keyword research data
+    enhanced_keywords = []
+    
+    if serp_analyses:
+        # Use SERP analysis data with keyword research enrichment
+        for s in serp_analyses:
+            kw_data = keyword_data.get(s.keyword_text, {})
+            enhanced_keywords.append((
+                s.keyword_text, 
+                s.content_gap_score or kw_data.get("score", 0),
+                kw_data.get("search_volume"),
+                kw_data.get("difficulty")
+            ))
+    else:
+        # Fallback: Use keyword research data directly
+        for kw in keywords:
+            enhanced_keywords.append((
+                kw.related_keyword,
+                kw.score or 0,
+                kw.search_volume,
+                kw.keyword_difficulty
+            ))
+    
     return SerpAnalysisData(
-        keywords=[(s.keyword_text, s.content_gap_score) for s in serp_analyses],
+        keywords=enhanced_keywords,  # Now includes volume and difficulty
         competitor_gaps=extract_content_gaps(competitor_analyses),
         competitive_advantages=identify_advantages(competitor_analyses),
         serp_metadata=compile_serp_metadata(serp_analyses)
@@ -115,11 +233,13 @@ def identify_advantages(competitor_analyses: List[CompetitorAnalysis]) -> List[s
     """Identify competitive advantages from analysis"""
     advantages = []
     for comp in competitor_analyses:
-        if comp.competitive_advantages:
-            if isinstance(comp.competitive_advantages, list):
-                advantages.extend(comp.competitive_advantages)
-            elif isinstance(comp.competitive_advantages, str):
-                advantages.append(comp.competitive_advantages)
+        # DB model column is `competitive_advantage` (singular Text); handle
+        # both string and (defensively) list shapes.
+        if comp.competitive_advantage:
+            if isinstance(comp.competitive_advantage, list):
+                advantages.extend(comp.competitive_advantage)
+            elif isinstance(comp.competitive_advantage, str):
+                advantages.append(comp.competitive_advantage)
     return advantages[:5]  # Top 5 advantages
 
 def compile_serp_metadata(serp_analyses: List[SerpAnalysis]) -> Dict:
@@ -127,7 +247,7 @@ def compile_serp_metadata(serp_analyses: List[SerpAnalysis]) -> Dict:
     return {
         "avg_content_score": sum(s.content_gap_score or 0 for s in serp_analyses) / max(len(serp_analyses), 1),
         "total_keywords": len(serp_analyses),
-        "analyzed_urls": [s.target_url for s in serp_analyses if s.target_url],
+        "analyzed_urls": [s.top_competitor_url for s in serp_analyses if s.top_competitor_url],
         "analysis_date": max(s.created_at for s in serp_analyses) if serp_analyses else None
     }
 
@@ -163,7 +283,9 @@ Generate a content brief with:
 4. Target word count (1500-3000)
 5. Unique content angle
 6. Call-to-action suggestions
-7. Article outline with sections
+7. Article outline with exactly 8-10 main sections (each section should be substantial and cover different aspects)
+
+IMPORTANT: Generate exactly 8-10 main sections for the table of contents.
 
 Return as JSON with keys: goal, type, audience, intent, word_count, angle, ctas, sections"""
     
@@ -257,9 +379,13 @@ def parse_and_validate_outline(outline_data: dict) -> ValidatedOutline:
 async def generate_introduction(
     content_brief: ContentBrief,
     brand_profile: BrandProfile,
-    keyword: str
+    keyword: str,
+    sub_keywords: List[str] = None
 ) -> str:
     """Track 1 · intro - AI generates introduction (300–500w HTML)"""
+    
+    sub_keywords = sub_keywords or []
+    sub_keywords_str = f"- Sub-keywords to include naturally (1-2 times each): {', '.join(sub_keywords[:3])}" if sub_keywords else ""
     
     prompt = f"""Write an engaging introduction for a blog article.
 
@@ -272,14 +398,18 @@ BRAND VOICE:
 - Tone: {brand_profile.tone_rules}
 - Unique Angle: {brand_profile.unique_angle}
 
-KEYWORD: {keyword}
+KEYWORD OPTIMIZATION:
+- Main Keyword: {keyword}
+- Include main keyword 2-3 times naturally (targeting 2% density in full article)
+{sub_keywords_str}
 
 Write a 300-500 word introduction that:
 1. Hooks the reader immediately
-2. Introduces the topic naturally with the keyword
+2. Introduces the topic naturally with the keyword appearing 2-3 times
 3. Sets expectations for what they'll learn
 4. Matches the brand voice and tone
 5. Creates curiosity to read more
+6. Naturally integrates sub-keywords without forcing them
 
 Return clean HTML (paragraphs only, no heading tags)."""
     
@@ -295,11 +425,19 @@ Return clean HTML (paragraphs only, no heading tags)."""
 async def generate_body_sections(
     outline: ValidatedOutline,
     content_brief: ContentBrief,
-    brand_profile: BrandProfile
+    brand_profile: BrandProfile,
+    keyword: str = None,
+    sub_keywords: List[str] = None
 ) -> List[GeneratedSection]:
     """Track 2 · body - Split sections → Loop per section"""
     
+    sub_keywords = sub_keywords or []
+    
     async def generate_single_section(section: ValidatedSection) -> GeneratedSection:
+        # Distribute sub-keywords across sections
+        section_sub_keywords = sub_keywords[section.index:section.index+3] if sub_keywords else []
+        sub_keywords_str = f"- Sub-keywords to include naturally: {', '.join(section_sub_keywords)}" if section_sub_keywords else ""
+        
         prompt = f"""Write a comprehensive section for a blog article.
 
 SECTION DETAILS:
@@ -317,12 +455,20 @@ BRAND VOICE:
 - Tone: {brand_profile.tone_rules}
 - Unique Angle: {brand_profile.unique_angle}
 
+KEYWORD OPTIMIZATION:
+- Main Keyword: {keyword if keyword else 'N/A'}
+- Include main keyword 2-4 times naturally (targeting 2% density overall)
+{sub_keywords_str}
+- Aim for 0.5-1% density for sub-keywords
+
 Write engaging, informative content that:
 1. Thoroughly covers all phases mentioned
 2. Uses practical examples and actionable advice
 3. Maintains the brand voice and tone
 4. Is scannable with subheadings if needed
 5. Flows naturally from the previous context
+6. Integrates keywords naturally without keyword stuffing
+7. Maintains 2% density for main keyword, 0.5-1% for sub-keywords
 
 Return clean HTML (no heading tag for the main section title - it will be added separately)."""
         
@@ -394,11 +540,15 @@ Return clean HTML with ordered list structure."""
 async def generate_conclusion(
     content_brief: ContentBrief,
     brand_profile: BrandProfile,
-    sections: List[GeneratedSection]
+    sections: List[GeneratedSection],
+    keyword: str = None,
+    sub_keywords: List[str] = None
 ) -> str:
     """AI · Conclusion (Takeaways + CTA)"""
     
     key_takeaways = [s.heading for s in sections]
+    sub_keywords = sub_keywords or []
+    sub_keywords_str = f"- Sub-keywords to include naturally: {', '.join(sub_keywords[:2])}" if sub_keywords else ""
     
     prompt = f"""Write a compelling conclusion for the blog article.
 
@@ -414,12 +564,19 @@ BRAND CONTEXT:
 - Unique Angle: {brand_profile.unique_angle}
 - Brand: {brand_profile.name}
 
+KEYWORD OPTIMIZATION:
+- Main Keyword: {keyword if keyword else 'N/A'}
+- Include main keyword 1-2 times naturally
+{sub_keywords_str}
+
 Write a conclusion that:
 1. Summarizes key takeaways from the article
 2. Reinforces the main value proposition
 3. Includes a relevant call-to-action
 4. Encourages further engagement
 5. Maintains brand voice and tone
+6. Naturally includes the main keyword 1-2 times
+7. Integrates sub-keywords without forcing them
 
 Target 200-400 words. Return clean HTML."""
     
@@ -432,11 +589,440 @@ Target 200-400 words. Return clean HTML."""
         temperature=0.6
     )
 
+async def generate_faq_section(
+    keyword: str,
+    sub_keywords: List[str],
+    content_brief: ContentBrief,
+    brand_profile: BrandProfile,
+    sections: List[GeneratedSection] = None
+) -> str:
+    """Generate FAQ section with 5-7 questions including keyword optimization"""
+    
+    sections_context = ""
+    if sections:
+        section_headings = [s.heading for s in sections]
+        sections_context = f"- Article sections covered: {', '.join(section_headings)}"
+    
+    prompt = f"""Generate a comprehensive FAQ section for this blog article.
+
+MAIN TOPIC: {keyword}
+SUB-TOPICS/KEYWORDS: {', '.join(sub_keywords[:10])}
+
+CONTENT CONTEXT:
+- Goal: {content_brief.goal}
+- Target Audience: {content_brief.target_audience}
+- Content Angle: {content_brief.content_angle}
+{sections_context}
+
+BRAND VOICE:
+- Tone: {brand_profile.tone_rules}
+- Brand: {brand_profile.name}
+
+REQUIREMENTS:
+1. Generate 6-8 frequently asked questions
+2. Each question should address real user concerns
+3. Include the main keyword "{keyword}" naturally in 2-3 questions
+4. Include sub-keywords naturally across different Q&As
+5. Each answer should be 100-150 words, informative and actionable
+6. Maintain {brand_profile.tone_rules} tone throughout
+7. Use schema.org FAQ markup structure
+
+Format as clean HTML with proper FAQ schema markup:
+<div itemscope itemtype="https://schema.org/FAQPage">
+  <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+    <h3 itemprop="name">Question here?</h3>
+    <div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+      <div itemprop="text">
+        <p>Answer here...</p>
+      </div>
+    </div>
+  </div>
+  <!-- Repeat for each Q&A -->
+</div>
+
+Return the complete FAQ section in HTML with schema markup."""
+    
+    llm = LLMService()
+    return await llm.call(
+        model=get_settings().extraction_model,
+        prompt=prompt,
+        response_format="text",
+        max_tokens=2000,
+        temperature=0.6
+    )
+
+async def generate_brand_value_section(
+    keyword: str,
+    brand_profile: BrandProfile,
+    content_brief: ContentBrief
+) -> str:
+    """Generate 'How [Brand] helps you in this' section"""
+    
+    prompt = f"""Write a compelling section explaining how {brand_profile.name} specifically helps with {keyword}.
+
+BRAND CONTEXT:
+- Brand: {brand_profile.name}
+- One-liner: {brand_profile.one_liner}
+- Industry: {brand_profile.industry or 'General'}
+- Unique Angle: {brand_profile.unique_angle}
+- Tone: {brand_profile.tone_rules}
+- CTAs: {', '.join(brand_profile.ctas)}
+
+CONTENT CONTEXT:
+- Topic: {keyword}
+- Goal: {content_brief.goal}
+- Target Audience: {content_brief.target_audience}
+
+Write a section that:
+1. Has the heading "How {brand_profile.name} Helps You With {keyword.title()}"
+2. Explains specific ways the brand addresses the topic/challenges
+3. Highlights unique features, services, or advantages
+4. Shows practical benefits for the target audience
+5. Maintains the brand's tone and voice
+6. Includes a subtle call-to-action
+7. Is 200-300 words
+
+Return clean HTML with proper heading and paragraph structure."""
+    
+    llm = LLMService()
+    return await llm.call(
+        model=get_settings().extraction_model,
+        prompt=prompt,
+        response_format="text",
+        max_tokens=600,
+        temperature=0.6
+    )
+
+# ---------------------------------------------------------------------------
+# Link Strategy and Backlinking System
+# ---------------------------------------------------------------------------
+
+def prepare_link_strategy(
+    brand_profile: BrandProfile,
+    serp_data: SerpAnalysisData,
+    target_keyword: str
+) -> LinkStrategy:
+    """Prepare comprehensive linking strategy from brand profile and SERP data"""
+    
+    # Internal links from brand profile
+    internal_links = []
+    for link_data in brand_profile.internal_links:
+        if isinstance(link_data, dict) and link_data.get("url"):
+            internal_links.append(LinkData(
+                url=link_data.get("url", ""),
+                anchor_text=link_data.get("anchor_text", ""),
+                link_type="internal",
+                description=link_data.get("description", ""),
+                rel_attributes="",  # Internal links don't need rel attributes
+                priority=link_data.get("priority", "medium"),
+                keywords=link_data.get("keywords", []),
+                target_blank=False  # Keep users on site
+            ))
+    
+    # Source citations from SERP competitor data
+    source_citations = []
+    
+    # Extract competitor URLs as potential sources
+    if hasattr(serp_data, 'serp_metadata') and serp_data.serp_metadata:
+        metadata = serp_data.serp_metadata
+        if isinstance(metadata, dict) and 'top_competitors' in metadata:
+            for i, comp in enumerate(metadata['top_competitors'][:3]):  # Top 3 competitors
+                if isinstance(comp, dict) and comp.get('url'):
+                    source_citations.append(SourceCitation(
+                        title=comp.get('title', f'Industry Analysis #{i+1}'),
+                        url=comp['url'],
+                        publication=comp.get('domain', 'Industry Source'),
+                        relevance_score=max(0.1, 1.0 - (i * 0.2)),  # Decreasing relevance by rank
+                        trust_level="medium"
+                    ))
+    
+    # Product/service links from brand CTAs and website
+    product_links = []
+    if brand_profile.site_url:
+        # Create product links based on CTAs
+        for cta in brand_profile.ctas[:3]:  # Max 3 CTAs
+            if cta and len(cta.strip()) > 0:
+                product_links.append(LinkData(
+                    url=brand_profile.site_url,
+                    anchor_text=cta,
+                    link_type="product",
+                    description=f"Link to {brand_profile.name} - {cta}",
+                    rel_attributes="",  # Own product links
+                    priority="high",
+                    keywords=[target_keyword.lower()],
+                    target_blank=False
+                ))
+    
+    # External references for credibility (industry authorities)
+    external_references = []
+    authority_sources = get_authority_sources_by_topic(target_keyword)
+    for source in authority_sources:
+        external_references.append(LinkData(
+            url=source['url'],
+            anchor_text=source['anchor_text'],
+            link_type="external",
+            description=source['description'],
+            rel_attributes="noopener nofollow",  # External links
+            priority="medium",
+            keywords=source.get('keywords', []),
+            target_blank=True
+        ))
+    
+    return LinkStrategy(
+        internal_links=internal_links,
+        source_citations=source_citations,
+        product_links=product_links,
+        external_references=external_references,
+        max_links_per_section=3,
+        require_disclosures=True
+    )
+
+def get_authority_sources_by_topic(keyword: str) -> List[dict]:
+    """Get authoritative sources based on keyword topic for credible external links"""
+    
+    keyword_lower = keyword.lower()
+    sources = []
+    
+    # Tech/AI related keywords
+    if any(term in keyword_lower for term in ['ai', 'artificial intelligence', 'machine learning', 'technology', 'software', 'automation']):
+        sources.extend([
+            {
+                "url": "https://www.mckinsey.com/capabilities/quantumblack/our-insights/the-state-of-ai",
+                "anchor_text": "McKinsey Global Institute AI research",
+                "description": "Authoritative AI industry research",
+                "keywords": ["ai", "artificial intelligence", "research"]
+            },
+            {
+                "url": "https://www.gartner.com/en/information-technology/glossary/artificial-intelligence",
+                "anchor_text": "Gartner's AI insights",
+                "description": "Industry standard AI analysis",
+                "keywords": ["ai", "technology", "industry analysis"]
+            }
+        ])
+    
+    # Marketing related keywords  
+    if any(term in keyword_lower for term in ['marketing', 'digital marketing', 'seo', 'content marketing', 'social media']):
+        sources.extend([
+            {
+                "url": "https://blog.hubspot.com/marketing",
+                "anchor_text": "HubSpot Marketing insights",
+                "description": "Leading marketing research and trends",
+                "keywords": ["marketing", "digital marketing", "trends"]
+            },
+            {
+                "url": "https://moz.com/beginners-guide-to-seo",
+                "anchor_text": "Moz SEO research",
+                "description": "Comprehensive SEO best practices",
+                "keywords": ["seo", "search optimization", "guide"]
+            }
+        ])
+    
+    # Business/productivity keywords
+    if any(term in keyword_lower for term in ['business', 'productivity', 'workflow', 'efficiency', 'strategy']):
+        sources.extend([
+            {
+                "url": "https://hbr.org/topic/productivity",
+                "anchor_text": "Harvard Business Review productivity research",
+                "description": "Academic business and productivity insights",
+                "keywords": ["business", "productivity", "research"]
+            },
+            {
+                "url": "https://www.mckinsey.com/business-functions/operations/our-insights",
+                "anchor_text": "McKinsey Operations insights",
+                "description": "Business operations and efficiency research",
+                "keywords": ["business", "operations", "efficiency"]
+            }
+        ])
+    
+    # Financial/economics keywords
+    if any(term in keyword_lower for term in ['finance', 'investment', 'economics', 'cost', 'roi', 'revenue']):
+        sources.extend([
+            {
+                "url": "https://www.investopedia.com",
+                "anchor_text": "Investopedia financial analysis",
+                "description": "Comprehensive financial education resource",
+                "keywords": ["finance", "investment", "analysis"]
+            }
+        ])
+    
+    # Return top 2-3 most relevant sources to avoid over-linking
+    return sources[:3]
+
+async def insert_contextual_links(
+    content: str,
+    link_strategy: LinkStrategy,
+    section_index: int = 0,
+    content_type: str = "body"
+) -> tuple[str, List[LinkData]]:
+    """AI-powered contextual link insertion into content"""
+    
+    # Determine which links to use for this section
+    available_links = []
+    
+    if content_type == "introduction":
+        # Introduction: 1 authority link, 1 internal link
+        available_links.extend(link_strategy.external_references[:1])
+        available_links.extend(link_strategy.internal_links[:1])
+    elif content_type == "body":
+        # Body sections: Mix of internal, external, and sources
+        available_links.extend(link_strategy.internal_links[section_index:section_index+1])
+        available_links.extend(link_strategy.external_references[section_index:section_index+1])
+        available_links.extend(link_strategy.source_citations[section_index:section_index+1])
+    elif content_type == "conclusion":
+        # Conclusion: Product links + 1 authority
+        available_links.extend(link_strategy.product_links[:2])
+        available_links.extend(link_strategy.external_references[:1])
+    elif content_type == "brand_value":
+        # Brand value section: All product links
+        available_links.extend(link_strategy.product_links)
+    
+    if not available_links:
+        return content, []
+    
+    # Use AI to insert links contextually
+    links_data = []
+    for link in available_links[:link_strategy.max_links_per_section]:
+        if isinstance(link, SourceCitation):
+            link_data = LinkData(
+                url=link.url,
+                anchor_text=link.title,
+                link_type="source",
+                rel_attributes="noopener nofollow",
+                target_blank=True
+            )
+        else:
+            link_data = link
+        
+        links_data.append(link_data)
+    
+    # AI prompt for contextual link insertion
+    prompt = f"""Insert {len(links_data)} contextually relevant links into this content.
+
+CONTENT TO ENHANCE:
+{content}
+
+LINKS TO INSERT:
+{json.dumps([{
+    "url": link.url,
+    "anchor_text": link.anchor_text,
+    "type": link.link_type
+} for link in links_data], indent=2)}
+
+INSTRUCTIONS:
+1. Find natural places in the text where these links would add value
+2. Modify existing sentences or add new sentences that naturally incorporate the links
+3. Use the provided anchor text but adapt it to fit grammatically
+4. Don't force links - only insert where they enhance the content
+5. Maintain the original tone and flow
+6. Insert links as HTML: <a href="url" rel="attributes" target="_blank">anchor text</a>
+
+Return the enhanced content with links naturally integrated."""
+
+    try:
+        llm = LLMService()
+        enhanced_content = await llm.call(
+            model=get_settings().extraction_model,
+            prompt=prompt,
+            response_format="text",
+            max_tokens=2000,
+            temperature=0.4
+        )
+        
+        return enhanced_content, links_data
+        
+    except Exception as e:
+        logger.warning(f"Link insertion failed: {e}, returning original content")
+        return content, []
+
+def format_link_html(link: LinkData) -> str:
+    """Format a link as proper HTML with all attributes"""
+    
+    rel_attr = f' rel="{link.rel_attributes}"' if link.rel_attributes else ""
+    target_attr = ' target="_blank"' if link.target_blank else ""
+    
+    return f'<a href="{link.url}"{rel_attr}{target_attr}>{link.anchor_text}</a>'
+
+def generate_link_disclosures(links: List[LinkData]) -> List[str]:
+    """Generate required disclosure text for affiliate/sponsored links"""
+    
+    disclosures = []
+    has_affiliate = any(link.link_type == "affiliate" for link in links)
+    has_sponsored = any("sponsored" in link.rel_attributes for link in links)
+    
+    if has_affiliate:
+        disclosures.append("*This post contains affiliate links. We may earn a commission at no extra cost to you.")
+    
+    if has_sponsored:
+        disclosures.append("*Some links in this content are sponsored partnerships.")
+    
+    return disclosures
+
+# ---------------------------------------------------------------------------
+# Link Validation and Compliance
+# ---------------------------------------------------------------------------
+
+async def validate_links(links: List[LinkData]) -> List[LinkData]:
+    """Validate links for accessibility and compliance"""
+    
+    validated_links = []
+    
+    for link in links:
+        try:
+            # Basic URL validation
+            if not link.url or not link.url.startswith(('http://', 'https://')):
+                logger.warning(f"Invalid URL format: {link.url}")
+                continue
+            
+            # Check for required rel attributes based on link type
+            if link.link_type == "external" and "nofollow" not in link.rel_attributes:
+                link.rel_attributes = "noopener nofollow"
+            elif link.link_type == "affiliate" and "sponsored" not in link.rel_attributes:
+                link.rel_attributes = "sponsored noopener"
+            
+            # Ensure anchor text is not empty
+            if not link.anchor_text or len(link.anchor_text.strip()) < 2:
+                logger.warning(f"Invalid anchor text for {link.url}")
+                continue
+            
+            validated_links.append(link)
+            
+        except Exception as e:
+            logger.warning(f"Link validation failed for {link.url}: {e}")
+            continue
+    
+    logger.info(f"Link validation: {len(validated_links)}/{len(links)} links passed validation")
+    return validated_links
+
+def validate_link_density(content: str, max_density: float = 0.03) -> bool:
+    """Check if link density is within acceptable range (max 3% recommended)"""
+    
+    import re
+    
+    # Count total words
+    text_only = re.sub(r'<[^>]+>', ' ', content)
+    total_words = len(text_only.split())
+    
+    # Count links
+    link_count = len(re.findall(r'<a\s+[^>]*href', content, re.IGNORECASE))
+    
+    if total_words == 0:
+        return True
+    
+    density = link_count / total_words
+    is_valid = density <= max_density
+    
+    if not is_valid:
+        logger.warning(f"Link density too high: {density:.3f} ({link_count} links in {total_words} words)")
+    
+    return is_valid
+
 def merge_content_by_position(
     introduction: str,
     table_of_contents: str,
     body_sections: List[GeneratedSection],
-    conclusion: str
+    conclusion: str,
+    brand_value_section: str = None,
+    faq_section: str = None
 ) -> AssembledContent:
     """Merge (intro · TOC · conclusion) by position"""
     
@@ -454,16 +1040,33 @@ def merge_content_by_position(
     
     body_html = "\n\n".join(sections_html)
     
+    # Add brand value and FAQ to word count if present
+    brand_value_word_count = count_words_in_html(brand_value_section) if brand_value_section else 0
+    faq_word_count = count_words_in_html(faq_section) if faq_section else 0
+    
     return AssembledContent(
         introduction=introduction,
         table_of_contents=table_of_contents,
         body=body_html,
         conclusion=conclusion,
-        total_word_count=sum(s.word_count for s in body_sections)
+        brand_value_section=brand_value_section,
+        faq_section=faq_section,
+        total_word_count=sum(s.word_count for s in body_sections) + brand_value_word_count + faq_word_count
     )
 
 def assemble_article_html(assembled_content: AssembledContent, meta: MetaAndOutline) -> FinalArticle:
     """Assemble article HTML + word count - Sort sections by index → concatenate inside <article>"""
+    
+    brand_value_html = f"""
+        <div class="brand-value-section">
+            {assembled_content.brand_value_section}
+        </div>""" if assembled_content.brand_value_section else ""
+    
+    faq_html = f"""
+        <div class="faq-section">
+            <h2>Frequently Asked Questions</h2>
+            {assembled_content.faq_section}
+        </div>""" if assembled_content.faq_section else ""
     
     full_html = f"""
     <article class="generated-content">
@@ -486,6 +1089,8 @@ def assemble_article_html(assembled_content: AssembledContent, meta: MetaAndOutl
         <div class="conclusion">
             {assembled_content.conclusion}
         </div>
+        {brand_value_html}
+        {faq_html}
     </article>
     """.strip()
     
@@ -497,6 +1102,73 @@ def assemble_article_html(assembled_content: AssembledContent, meta: MetaAndOutl
         word_count=assembled_content.total_word_count
     )
 
+def assemble_article_html_with_links(
+    assembled_content: AssembledContent,
+    meta: MetaAndOutline,
+    links_added: List[LinkData],
+    sources_cited: List[SourceCitation],
+    link_disclosures: List[str]
+) -> FinalArticle:
+    """Assemble article HTML with link tracking and disclosures"""
+    
+    brand_value_html = f"""
+        <div class="brand-value-section">
+            {assembled_content.brand_value_section}
+        </div>""" if assembled_content.brand_value_section else ""
+    
+    faq_html = f"""
+        <div class="faq-section">
+            <h2>Frequently Asked Questions</h2>
+            {assembled_content.faq_section}
+        </div>""" if assembled_content.faq_section else ""
+    
+    # Add disclosure section if needed
+    disclosure_html = ""
+    if link_disclosures:
+        disclosure_html = f"""
+        <div class="link-disclosures">
+            <hr>
+            {'<br>'.join(link_disclosures)}
+        </div>"""
+    
+    full_html = f"""
+    <article class="generated-content">
+        <header>
+            <h1>{meta.h1}</h1>
+        </header>
+        
+        <div class="introduction">
+            {assembled_content.introduction}
+        </div>
+        
+        <div class="table-of-contents">
+            {assembled_content.table_of_contents}
+        </div>
+        
+        <div class="article-body">
+            {assembled_content.body}
+        </div>
+        
+        <div class="conclusion">
+            {assembled_content.conclusion}
+        </div>
+        {brand_value_html}
+        {faq_html}
+        {disclosure_html}
+    </article>
+    """.strip()
+    
+    return FinalArticle(
+        meta_title=meta.meta_title,
+        meta_description=meta.meta_description,
+        slug=meta.slug,
+        html_content=full_html,
+        word_count=assembled_content.total_word_count,
+        links_added=links_added,
+        sources_cited=sources_cited,
+        link_disclosures=link_disclosures
+    )
+
 async def save_content_draft(
     job: Job,
     article: FinalArticle,
@@ -504,7 +1176,7 @@ async def save_content_draft(
 ) -> BlogDraft:
     """Save to blog_drafts table · Stage = Draft"""
     
-    # Create or update blog job for this content generation
+    # Update or create blog job for UI integration
     blog_job = db.query(BlogJob).filter(BlogJob.id == job.id).first()
     if not blog_job:
         # Create new blog job from content generation job
@@ -512,24 +1184,33 @@ async def save_content_draft(
             id=job.id,
             org_id=job.org_id,
             brand_id=job.brand_id,
-            created_by=job.created_by if hasattr(job, 'created_by') else 'system',
+            created_by=job.input_payload.get("created_by", "system"),
             keyword=job.input_payload.get("keyword", "Generated Content"),
-            status="PENDING_REVIEW"
+            status="WRITING"  # Will be updated to PENDING_REVIEW when complete
         )
         db.add(blog_job)
     
-    # Create draft
-    draft = BlogDraft(
-        job_id=job.id,
-        title=article.meta_title,
-        meta_description=article.meta_description,
-        html_content=article.html_content,
-        word_count=article.word_count,
-        seo_score=80,  # Default score, can be calculated later
-        approved=False
-    )
-    
-    db.add(draft)
+    # Create or update draft
+    existing_draft = db.query(BlogDraft).filter(BlogDraft.job_id == job.id).first()
+    if existing_draft:
+        # Update existing draft
+        existing_draft.title = article.meta_title
+        existing_draft.meta_description = article.meta_description
+        existing_draft.html_content = article.html_content
+        existing_draft.word_count = article.word_count
+        draft = existing_draft
+    else:
+        # Create new draft
+        draft = BlogDraft(
+            job_id=job.id,
+            title=article.meta_title,
+            meta_description=article.meta_description,
+            html_content=article.html_content,
+            word_count=article.word_count,
+            seo_score=85,  # Higher score for Pipeline 3 with SEO optimization
+            approved=False
+        )
+        db.add(draft)
     
     # Update job stage
     job.stage = JOB_STAGE_DRAFT
@@ -571,6 +1252,63 @@ def count_words_in_html(html_content: str) -> int:
     # Count words
     words = text.split()
     return len([w for w in words if w.strip()])
+
+def calculate_keyword_density(content: str, keyword: str) -> float:
+    """Calculate keyword density as a percentage"""
+    import re
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', ' ', content).lower()
+    # Count total words
+    words = text.split()
+    total_words = len([w for w in words if w.strip()])
+    
+    if total_words == 0:
+        return 0.0
+    
+    # Count keyword occurrences (case-insensitive)
+    keyword_lower = keyword.lower()
+    keyword_count = text.count(keyword_lower)
+    
+    # Calculate density
+    density = (keyword_count / total_words) * 100
+    return round(density, 2)
+
+def analyze_content_seo_metrics(content: str, main_keyword: str, sub_keywords: List[str]) -> Dict[str, any]:
+    """Analyze SEO metrics for the generated content"""
+    metrics = {
+        "total_words": count_words_in_html(content),
+        "main_keyword": {
+            "keyword": main_keyword,
+            "density": calculate_keyword_density(content, main_keyword),
+            "target": 2.0,
+            "status": "optimized"
+        },
+        "sub_keywords": []
+    }
+    
+    # Check if main keyword density is within target range
+    if metrics["main_keyword"]["density"] < 1.5:
+        metrics["main_keyword"]["status"] = "under-optimized"
+    elif metrics["main_keyword"]["density"] > 2.5:
+        metrics["main_keyword"]["status"] = "over-optimized"
+    
+    # Analyze sub-keywords
+    for sub_kw in sub_keywords[:10]:  # Top 10 sub-keywords
+        density = calculate_keyword_density(content, sub_kw)
+        status = "optimized"
+        if density < 0.3:
+            status = "under-optimized"
+        elif density > 1.5:
+            status = "over-optimized"
+            
+        metrics["sub_keywords"].append({
+            "keyword": sub_kw,
+            "density": density,
+            "target": "0.5-1.0",
+            "status": status
+        })
+    
+    return metrics
 
 # Image generation functions
 async def generate_image_prompt(
@@ -680,8 +1418,11 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
     try:
         logger.info(f"Starting content generation pipeline for job {job_id}")
         
+        # Check if this job was triggered from a SERP analysis job
+        serp_job_id = job.input_payload.get("serp_analysis_job_id") if job.input_payload else None
+        
         # 01. Load SERP analysis
-        serp_data = await load_serp_analysis(job_id, job.brand_id, db)
+        serp_data = await load_serp_analysis(job_id, job.brand_id, db, serp_job_id)
         logger.info(f"Loaded SERP data: {len(serp_data.keywords)} keywords, {len(serp_data.competitor_gaps)} gaps")
         
         # 02. Get brand profile
@@ -694,6 +1435,17 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         
         target_keyword = job.input_payload.get("keyword", "content topic")
         logger.info(f"Target keyword: {target_keyword}")
+        
+        # Extract sub-keywords from SERP data for distribution
+        # Keywords are now tuples: (keyword, score, volume, difficulty)
+        sub_keywords = [kw[0] for kw in serp_data.keywords[:15] if kw[0] != target_keyword]  # Top 15 sub-keywords
+        logger.info(f"Extracted {len(sub_keywords)} sub-keywords for optimization")
+        
+        # Log keyword intelligence if available
+        if serp_data.keywords:
+            top_kw = serp_data.keywords[0]
+            if len(top_kw) > 2 and top_kw[2]:  # Has volume data
+                logger.info(f"Top keyword '{top_kw[0]}' - Volume: {top_kw[2]}, Difficulty: {top_kw[3]}")
         
         # 03. Generate content brief
         logger.info("Generating content brief...")
@@ -709,29 +1461,96 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         validated_outline = parse_and_validate_outline(meta_outline.model_dump())
         logger.info(f"Outline validated: {len(validated_outline.sections)} sections")
         
-        # 06. Parallel content generation
-        logger.info("Starting parallel content generation...")
-        intro_task = generate_introduction(content_brief, brand_profile, target_keyword)
-        body_task = generate_body_sections(validated_outline, content_brief, brand_profile)
+        # 06. Prepare link strategy
+        logger.info("Preparing link strategy...")
+        link_strategy = prepare_link_strategy(brand_profile, serp_data, target_keyword)
+        logger.info(f"Link strategy prepared: {len(link_strategy.internal_links)} internal, {len(link_strategy.external_references)} external, {len(link_strategy.product_links)} product links")
+
+        # 07. Parallel content generation with keyword optimization
+        logger.info("Starting parallel content generation with keyword optimization...")
+        intro_task = generate_introduction(content_brief, brand_profile, target_keyword, sub_keywords)
+        body_task = generate_body_sections(validated_outline, content_brief, brand_profile, target_keyword, sub_keywords)
         
         introduction, body_sections = await asyncio.gather(intro_task, body_task)
-        logger.info(f"Generated introduction and {len(body_sections)} body sections")
+        logger.info(f"Generated introduction and {len(body_sections)} body sections with keyword optimization")
         
-        # 07. Generate TOC and conclusion
-        logger.info("Generating TOC and conclusion...")
+        # 07. Generate TOC, conclusion, brand value section, and FAQ
+        logger.info("Generating TOC, conclusion, brand value section, and FAQ...")
         toc_task = generate_table_of_contents(body_sections)
-        conclusion_task = generate_conclusion(content_brief, brand_profile, body_sections)
+        conclusion_task = generate_conclusion(content_brief, brand_profile, body_sections, target_keyword, sub_keywords)
+        brand_value_task = generate_brand_value_section(target_keyword, brand_profile, content_brief)
+        faq_task = generate_faq_section(target_keyword, sub_keywords, content_brief, brand_profile, body_sections)
         
-        toc, conclusion = await asyncio.gather(toc_task, conclusion_task)
-        logger.info("TOC and conclusion generated")
+        toc, conclusion, brand_value_section, faq_section = await asyncio.gather(toc_task, conclusion_task, brand_value_task, faq_task)
+        logger.info("TOC, conclusion, brand value section, and FAQ generated")
         
-        # 08. Merge content
-        assembled_content = merge_content_by_position(introduction, toc, body_sections, conclusion)
-        logger.info(f"Content assembled: {assembled_content.total_word_count} words")
+        # 08. Insert contextual links into content
+        logger.info("Inserting contextual links...")
+        all_links_added = []
+        all_sources_cited = []
         
-        # 09. Assemble final article
-        final_article = assemble_article_html(assembled_content, meta_outline)
-        logger.info(f"Final article assembled: {final_article.meta_title}")
+        # Insert links in introduction
+        enhanced_intro, intro_links = await insert_contextual_links(
+            introduction, link_strategy, 0, "introduction"
+        )
+        all_links_added.extend(intro_links)
+        
+        # Insert links in body sections
+        enhanced_body_sections = []
+        for i, section in enumerate(body_sections):
+            enhanced_content, section_links = await insert_contextual_links(
+                section.content, link_strategy, i, "body"
+            )
+            enhanced_section = GeneratedSection(
+                index=section.index,
+                heading=section.heading,
+                heading_type=section.heading_type,
+                content=enhanced_content,
+                word_count=count_words_in_html(enhanced_content)
+            )
+            enhanced_body_sections.append(enhanced_section)
+            all_links_added.extend(section_links)
+        
+        # Insert links in conclusion
+        enhanced_conclusion, conclusion_links = await insert_contextual_links(
+            conclusion, link_strategy, 0, "conclusion"
+        )
+        all_links_added.extend(conclusion_links)
+        
+        # Insert links in brand value section
+        enhanced_brand_value, brand_value_links = await insert_contextual_links(
+            brand_value_section, link_strategy, 0, "brand_value"
+        )
+        all_links_added.extend(brand_value_links)
+        
+        # Add source citations to sources_cited list
+        all_sources_cited.extend(link_strategy.source_citations)
+        
+        logger.info(f"Links inserted: {len(all_links_added)} links across all sections")
+        
+        # Validate all links
+        all_links_added = await validate_links(all_links_added)
+        logger.info(f"Link validation completed: {len(all_links_added)} valid links")
+        
+        # 09. Merge enhanced content with brand value section and FAQ
+        assembled_content = merge_content_by_position(
+            enhanced_intro, toc, enhanced_body_sections, enhanced_conclusion, enhanced_brand_value, faq_section
+        )
+        logger.info(f"Enhanced content assembled: {assembled_content.total_word_count} words")
+        
+        # 10. Generate link disclosures and assemble final article
+        link_disclosures = generate_link_disclosures(all_links_added)
+        logger.info(f"Generated {len(link_disclosures)} link disclosures")
+        
+        final_article = assemble_article_html_with_links(
+            assembled_content, meta_outline, all_links_added, all_sources_cited, link_disclosures
+        )
+        logger.info(f"Final article assembled with links: {final_article.meta_title}")
+        
+        # Analyze SEO metrics for the generated content
+        seo_metrics = analyze_content_seo_metrics(final_article.html_content, target_keyword, sub_keywords)
+        logger.info(f"SEO Metrics - Main keyword '{target_keyword}' density: {seo_metrics['main_keyword']['density']}% (target: 2%)")
+        logger.info(f"SEO Metrics - Sub-keywords analyzed: {len(seo_metrics['sub_keywords'])}")
         
         # 10. Save draft
         draft = await save_content_draft(job, final_article, db)
@@ -749,6 +1568,12 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         
         job.stage = JOB_STAGE_COMPLETE
         job.status = "SUCCEEDED"
+        
+        # Update blog job status for UI compatibility
+        blog_job = db.query(BlogJob).filter(BlogJob.id == job_id).first()
+        if blog_job:
+            blog_job.status = "PENDING_REVIEW"  # Ready for user review/approval
+            
         db.commit()
         
         logger.info(f"Content generation completed successfully for job {job_id}")

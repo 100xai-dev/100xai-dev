@@ -314,170 +314,87 @@ async def fetch_and_extract(url: str, host_delay: float = 1.0) -> PageExtraction
 # Apify Website Content Crawler
 # ---------------------------------------------------------------------------
 
-async def _crawl_with_apify(seed_url: str, max_pages: int) -> CrawlResult:
+async def _crawl_with_firecrawl(seed_url: str, max_pages: int) -> CrawlResult:
     """
-    Calls Apify's Website Content Crawler actor and maps results to CrawlResult.
-    Raises CrawlError if the actor run fails or returns no pages.
+    Crawls seed_url (and linked pages) using Firecrawl's /crawl endpoint.
+    Returns markdown content mapped into CrawlResult.
     """
-    from apify_client import ApifyClient
+    from firecrawl import FirecrawlApp
     from app.config import get_settings
 
-    settings = get_settings()
-    api_key = settings.apify_api_key
+    api_key = get_settings().firecrawl_api_key
     if not api_key:
-        raise CrawlError("APIFY_API_KEY is not configured")
+        raise CrawlError("FIRECRAWL_API_KEY is not configured")
 
-    client = ApifyClient(api_key)
-    
-    # Configure based on plan tier
-    if settings.apify_premium_features:
-        # Premium settings for paid plans
-        run_input = {
-            "startUrls": [{"url": seed_url}],
-            "crawlerType": "playwright:adaptive",  # Browser-based for visual content
-            "maxCrawlPages": max_pages,
-            "maxCrawlDepth": 2,
-            "outputFormats": ["markdown"],
-            "removeCookieWarnings": True,
-            "blockMedia": False,               # Allow images and media
-            "ignoreCanonicalUrl": True,
-            "maxSessionRotations": 3,
-            "saveScreenshots": True,           # Enable screenshots
-            "saveHtmlToFile": True,            # Enable HTML saving
-            "forceFullPageScreenshots": True,
-            "agentBrowserNavigationTimeoutSecs": 30,
-        }
-        logger.info("Using Apify premium features for %s", seed_url)
-    else:
-        # Memory-efficient settings for free tier
-        run_input = {
-            "startUrls": [{"url": seed_url}],
-            "crawlerType": "cheerio",          # Lightweight crawler
-            "maxCrawlPages": min(max_pages, 15),  # Limit pages for memory
-            "maxCrawlDepth": 2,
-            "outputFormats": ["markdown"],
-            "removeCookieWarnings": True,
-            "blockMedia": True,                # Block media to save memory
-            "ignoreCanonicalUrl": True,
-            "maxSessionRotations": 1,
-            "saveScreenshots": False,          # No screenshots on free tier
-            "saveHtmlToFile": False,           # No HTML saving on free tier
-            "agentBrowserNavigationTimeoutSecs": 20,
-        }
-        logger.info("Using Apify free tier optimizations for %s", seed_url)
+    app = FirecrawlApp(api_key=api_key)
+    loop = asyncio.get_running_loop()
 
-    logger.info("Starting Apify crawl for %s (max %d pages)", seed_url, max_pages)
-    run = await asyncio.get_event_loop().run_in_executor(
+    logger.info("Starting Firecrawl crawl for %s (max %d pages)", seed_url, max_pages)
+
+    crawl_response = await loop.run_in_executor(
         None,
-        lambda: client.actor("apify/website-content-crawler").call(run_input=run_input, memory_mbytes=1024),
+        lambda: app.crawl_url(
+            seed_url,
+            params={
+                "limit": min(max_pages, 15),
+                "maxDepth": 2,
+                "scrapeOptions": {
+                    "formats": ["markdown"],
+                    "onlyMainContent": True,
+                },
+            },
+            poll_interval=3,
+        ),
     )
 
-    run_status = run.status if hasattr(run, "status") else run.get("status")
-    if not run or run_status not in ("SUCCEEDED", "SUCCEEDED"):
-        # SUCCEEDED is the only terminal success state; log but don't hard-fail if we got pages
-        if run_status != "SUCCEEDED":
-            logger.warning("Apify run status: %s — will check for partial results", run_status)
+    # SDK may return a dict or an object depending on version
+    if isinstance(crawl_response, dict):
+        data_items = crawl_response.get("data", [])
+    else:
+        data_items = getattr(crawl_response, "data", []) or []
 
     result = CrawlResult()
-    dataset_id = run.default_dataset_id if hasattr(run, "default_dataset_id") else run["defaultDatasetId"]
-    items = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: list(client.dataset(dataset_id).iterate_items()),
-    )
 
-    for item in items:
-        url = item.get("url") or item.get("loadedUrl", "")
-        text = item.get("markdown") or item.get("text") or ""
-        
-        # Debug: Log all available fields for the first item
-        if len(result.pages) == 0:
-            logger.info("Apify item fields for %s: %s", url, list(item.keys()))
-        
-        if not text or len(text.strip()) < 200:
-            result.failed_urls.append(url)
+    for item in data_items:
+        if isinstance(item, dict):
+            markdown = item.get("markdown", "")
+            meta = item.get("metadata", {})
+        else:
+            markdown = getattr(item, "markdown", "") or ""
+            raw_meta = getattr(item, "metadata", None)
+            meta = raw_meta.__dict__ if raw_meta and not isinstance(raw_meta, dict) else (raw_meta or {})
+
+        url = meta.get("sourceURL") or meta.get("url", "")
+
+        if not markdown or len(markdown.strip()) < 200:
+            if url:
+                result.failed_urls.append(url)
             continue
 
-        normalized = " ".join(text.split())
+        normalized = " ".join(markdown.split())
         word_count = len(normalized.split())
-        
-        # Extract visual content - check multiple possible field names
-        screenshot_url = (item.get("screenshotUrl") or 
-                         item.get("screenshot") or 
-                         item.get("screenshotFile") or "")
-        html_content = (item.get("html") or 
-                       item.get("htmlFile") or 
-                       item.get("rawHtml") or "")
-        
-        # Debug: Log what visual data we found
-        logger.info("Visual data for %s: screenshot=%s, html_length=%d", 
-                   url, bool(screenshot_url), len(html_content) if html_content else 0)
-        
-        metadata = {
-            "title": item.get("metadata", {}).get("title") or item.get("title", ""),
-            "meta_description": item.get("metadata", {}).get("description", ""),
-            "h1": [],
-            "h2": [],
-            "word_count": word_count,
-        }
+
         result.pages.append(PageExtraction(
             url=url,
-            raw_text=text,
+            raw_text=markdown,
             normalized_text=normalized,
-            metadata=metadata,
+            metadata={
+                "title": meta.get("title", ""),
+                "meta_description": meta.get("description", ""),
+                "h1": [],
+                "h2": [],
+                "word_count": word_count,
+            },
             word_count=word_count,
-            screenshot_url=screenshot_url if screenshot_url else None,
-            html_content=html_content if html_content else None,
+            screenshot_url=None,
+            html_content=None,
         ))
-        logger.info("Apify extracted %d words from %s (screenshot: %s, html: %s)", 
-                   word_count, url, bool(screenshot_url), bool(html_content))
+        logger.info("Firecrawl extracted %d words from %s", word_count, url)
 
     if not result.pages:
-        # Retry once with playwright if cheerio got nothing (JS-heavy site)
-        logger.warning("cheerio returned 0 pages — retrying with playwright (basic)")
-        run_input["crawlerType"] = "playwright"  # Basic playwright, not adaptive
-        run_input["saveScreenshots"] = False     # Keep memory usage low
-        run_input["maxCrawlPages"] = min(max_pages, 10)  # Further reduce for playwright
-        run_input["agentBrowserNavigationTimeoutSecs"] = 15
-        run2 = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.actor("apify/website-content-crawler").call(run_input=run_input, memory_mbytes=1024),
-        )
-        dataset_id2 = run2.default_dataset_id if hasattr(run2, "default_dataset_id") else run2["defaultDatasetId"]
-        items2 = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: list(client.dataset(dataset_id2).iterate_items()),
-        )
-        for item in items2:
-            url = item.get("url") or item.get("loadedUrl", "")
-            text = item.get("markdown") or item.get("text") or ""
-            if not text or len(text.strip()) < 200:
-                result.failed_urls.append(url)
-                continue
-            normalized = " ".join(text.split())
-            word_count = len(normalized.split())
-            
-            # Extract visual content for retry as well - check multiple possible field names
-            screenshot_url = (item.get("screenshotUrl") or 
-                             item.get("screenshot") or 
-                             item.get("screenshotFile") or "")
-            html_content = (item.get("html") or 
-                           item.get("htmlFile") or 
-                           item.get("rawHtml") or "")
-            
-            result.pages.append(PageExtraction(
-                url=url,
-                raw_text=text,
-                normalized_text=normalized,
-                metadata={"title": item.get("metadata", {}).get("title", ""), "meta_description": "", "h1": [], "h2": [], "word_count": word_count},
-                word_count=word_count,
-                screenshot_url=screenshot_url if screenshot_url else None,
-                html_content=html_content if html_content else None,
-            ))
+        raise CrawlError(f"Firecrawl returned no extractable pages from {seed_url}")
 
-    if not result.pages:
-        raise CrawlError(f"Apify returned no extractable pages from {seed_url}")
-
-    logger.info("Apify crawl complete: %d pages, %d failed", len(result.pages), len(result.failed_urls))
+    logger.info("Firecrawl crawl complete: %d pages, %d failed", len(result.pages), len(result.failed_urls))
     return result
 
 
@@ -491,12 +408,12 @@ async def crawl_brand_website(
     host_delay: float = 1.0,
 ) -> CrawlResult:
     """
-    Crawls seed_url using Apify if APIFY_API_KEY is set, otherwise falls back
-    to the in-house httpx + Playwright crawler.
+    Crawls seed_url using Firecrawl if FIRECRAWL_API_KEY is set, otherwise
+    falls back to the in-house httpx + Playwright crawler.
     """
     from app.config import get_settings
-    if get_settings().apify_api_key:
-        return await _crawl_with_apify(seed_url, max_pages)
+    if get_settings().firecrawl_api_key:
+        return await _crawl_with_firecrawl(seed_url, max_pages)
 
     # --- in-house fallback ---
     result = CrawlResult()
@@ -526,39 +443,47 @@ async def crawl_brand_website(
     return result
 
 
-async def _make_apify_request(actor_name: str, run_input: dict, timeout_seconds: int = 60) -> dict:
+async def scrape_page_with_firecrawl(url: str, timeout_ms: int = 30000) -> dict:
     """
-    Make a request to an Apify actor and return the dataset items.
-    Used by SERP analysis service for competitor page crawling.
+    Scrape a single URL using Firecrawl's /scrape endpoint.
+    Returns {"markdown": str, "metadata": dict, "success": bool}.
+    Raises CrawlError if FIRECRAWL_API_KEY is not set or the request fails.
     """
-    from apify_client import ApifyClient
+    from firecrawl import FirecrawlApp
     from app.config import get_settings
 
-    api_key = get_settings().apify_api_key
+    api_key = get_settings().firecrawl_api_key
     if not api_key:
-        raise CrawlError("APIFY_API_KEY is not configured")
+        raise CrawlError("FIRECRAWL_API_KEY is not configured")
 
-    client = ApifyClient(api_key)
-    
-    logger.info("Starting Apify actor %s with input: %s", actor_name, run_input)
-    
-    # Run the actor
-    run = await asyncio.get_event_loop().run_in_executor(
+    app = FirecrawlApp(api_key=api_key)
+    loop = asyncio.get_running_loop()
+
+    logger.info("Firecrawl scraping %s (timeout=%dms)", url, timeout_ms)
+
+    result = await loop.run_in_executor(
         None,
-        lambda: client.actor(actor_name).call(run_input=run_input, memory_mbytes=1024),
+        lambda: app.scrape_url(
+            url,
+            params={
+                "formats": ["markdown"],
+                "onlyMainContent": True,
+                "timeout": timeout_ms,
+            },
+        ),
     )
 
-    # Get the dataset results
-    dataset_id = run.default_dataset_id if hasattr(run, "default_dataset_id") else run["defaultDatasetId"]
-    items = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: list(client.dataset(dataset_id).iterate_items()),
-    )
-    
+    if isinstance(result, dict):
+        return {
+            "markdown": result.get("markdown", ""),
+            "metadata": result.get("metadata", {}),
+            "success": bool(result.get("markdown")),
+        }
+
     return {
-        "run": run,
-        "items": items,
-        "run_status": run.status if hasattr(run, "status") else run.get("status")
+        "markdown": getattr(result, "markdown", "") or "",
+        "metadata": getattr(result, "metadata", {}),
+        "success": bool(getattr(result, "markdown", "")),
     }
 
 

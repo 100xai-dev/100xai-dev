@@ -34,9 +34,9 @@ export function BrandActions({ brand }: { brand: BrandSummary }) {
     try {
       setPending("delete");
       setMessage(null);
-      const response = await requestBrandDelete(brand.id);
-      setMessage({ type: "info", text: `Delete queued. Job ID: ${response.job_id}` });
-      router.refresh();
+      await requestBrandDelete(brand.id);
+      setMessage({ type: "info", text: `Brand "${brand.name}" deleted.` });
+      router.push("/brands");
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "Failed to request delete" });
     } finally {

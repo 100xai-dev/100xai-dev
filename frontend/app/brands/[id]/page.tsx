@@ -27,6 +27,7 @@ const tabs = [
   { num: "07", label: "Operational Params", href: (id: string) => `/brands/${id}/operational` },
   { num: "08", label: "Audit Trail", href: (id: string) => `/brands/${id}/audit` },
   { num: "09", label: "Blog Engine", href: (id: string) => `/brands/${id}/blogs` },
+  { num: "10", label: "Content Calendar", href: (id: string) => `/brands/${id}/calendar` },
 ];
 
 export default async function BrandDetailPage({ params }: PageProps) {

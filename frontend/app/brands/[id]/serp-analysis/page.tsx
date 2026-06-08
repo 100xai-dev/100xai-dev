@@ -255,7 +255,7 @@ export default function SerpAnalysisPage() {
           </div>
           <div className="card" style={{ textAlign: "center" }}>
             <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--accent)" }}>
-              {analyses.reduce((s, a) => s + (a.content_gaps?.length ?? 0), 0)}
+              {analyses.reduce((s, a) => s + a.competitors.reduce((cs, c) => cs + c.content_gaps.length, 0), 0)}
             </div>
             <div style={{ color: "var(--gray-500)", fontSize: "0.875rem", marginTop: 4 }}>Content Gaps Found</div>
           </div>

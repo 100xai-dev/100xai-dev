@@ -67,6 +67,37 @@ class WordPressProvider(IntegrationProvider):
 
             # 3. Verify write capability
             caps = user_info.get("capabilities", {})
+            
+            # InstaWP workaround: If capabilities are empty but auth succeeded,
+            # try a test post creation to verify actual permissions
+            if len(caps) == 0:
+                try:
+                    # Test with a draft post creation
+                    test_post = {
+                        "title": "Connection Test (Auto-Delete)",
+                        "content": "Temporary test post for integration verification.",
+                        "status": "draft"
+                    }
+                    test_resp = await client.post(f"{site_url}/wp-json/wp/v2/posts", json=test_post)
+                    
+                    if test_resp.status_code == 201:
+                        # Success! User can create posts. Clean up test post.
+                        post_data = test_resp.json()
+                        post_id = post_data.get("id")
+                        if post_id:
+                            await client.delete(f"{site_url}/wp-json/wp/v2/posts/{post_id}?force=true")
+                        # Assume administrator capabilities if post creation succeeded
+                        caps = {"publish_posts": True, "edit_posts": True}
+                    elif test_resp.status_code == 403:
+                        return TestResult(
+                            ok=False,
+                            error="User lacks permissions to create posts (verified by test)",
+                        )
+                except httpx.RequestError:
+                    # Network error during test, but auth worked, so continue
+                    pass
+            
+            # Standard capability check (works for normal WordPress, fails for InstaWP)
             if not (caps.get("publish_posts") or caps.get("edit_posts")):
                 return TestResult(
                     ok=False,
