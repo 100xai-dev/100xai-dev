@@ -30,6 +30,96 @@ def run_onboarding_pipeline_job(db: Session, *, job_id: str, brand_id: str) -> N
     asyncio.run(_run_pipeline_async(db, job_id=job_id, brand_id=brand_id))
 
 
+# ---------------------------------------------------------------------------
+# Re-ingest: re-run ONLY the ingest stage for a brand's existing sources.
+# Used to backfill brands whose vectors never landed (no re-crawl/re-extract).
+# ---------------------------------------------------------------------------
+
+def run_reingest_job(db: Session, *, job_id: str, brand_id: str) -> None:
+    """Sync entry point for RQ — re-embed an existing brand's sources + DNA."""
+    asyncio.run(_reingest_async(db, job_id=job_id, brand_id=brand_id))
+
+
+async def _reingest_async(db: Session, *, job_id: str, brand_id: str) -> None:
+    job = db.query(Job).filter(Job.id == job_id).one_or_none()
+    if not job:
+        logger.error("Reingest job %s not found", job_id)
+        return
+    try:
+        job.status = "PROCESSING"
+        job.started_at = datetime.now(timezone.utc)
+        db.commit()
+
+        sources = (
+            db.query(BrandKnowledgeSource)
+            .filter(BrandKnowledgeSource.brand_id == brand_id)
+            .all()
+        )
+        stats = await _ingest_stage(brand_id=brand_id, sources=sources, db=db)
+
+        job.status = "SUCCEEDED"
+        job.progress = {**(job.progress or {}), **stats}
+        job.output_payload = {"brand_id": brand_id, **stats}
+        job.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        logger.info("Reingest completed for brand %s: %s", brand_id, stats)
+    except Exception as exc:
+        logger.exception("Reingest failed for brand %s", brand_id)
+        db.rollback()
+        # Job-only failure — do NOT touch brand.status (brand may already be READY).
+        job = db.query(Job).filter(Job.id == job_id).one_or_none()
+        if job:
+            job.status = "FAILED"
+            job.error_message = str(exc)
+            job.finished_at = datetime.now(timezone.utc)
+            db.commit()
+
+
+def find_brands_needing_reingest(db: Session) -> list[str]:
+    """Brand ids that have knowledge sources but zero chunks (vectors never landed)."""
+    from sqlalchemy import func
+
+    from app.models import BrandKnowledgeChunk
+
+    src_brands = {
+        bid for (bid,) in db.query(BrandKnowledgeSource.brand_id)
+        .group_by(BrandKnowledgeSource.brand_id).all()
+    }
+    chunk_brands = {
+        bid for (bid,) in db.query(BrandKnowledgeChunk.brand_id)
+        .group_by(BrandKnowledgeChunk.brand_id).all()
+    }
+    return sorted(src_brands - chunk_brands)
+
+
+def backfill_all_brands(db: Session) -> list[dict]:
+    """Operator helper: enqueue a reingest job for every brand with sources but no chunks."""
+    from app.models.base import uuid_str
+    from app.services.job_dispatcher import JobDispatcher
+
+    dispatcher = JobDispatcher()
+    enqueued = []
+    for brand_id in find_brands_needing_reingest(db):
+        brand = db.query(Brand).filter(Brand.id == brand_id).one_or_none()
+        if not brand:
+            continue
+        job = Job(
+            id=uuid_str(),
+            org_id=brand.org_id,
+            brand_id=brand_id,
+            job_type="reingest",
+            status="QUEUED",
+            stage="INGEST",
+            input_payload={"brand_id": brand_id},
+        )
+        db.add(job)
+        db.commit()
+        dispatcher.enqueue_reingest(job_id=job.id, brand_id=brand_id)
+        enqueued.append({"brand_id": brand_id, "job_id": job.id})
+    logger.info("Backfill enqueued %d reingest jobs", len(enqueued))
+    return enqueued
+
+
 async def _run_pipeline_async(db: Session, *, job_id: str, brand_id: str) -> None:
     job = db.query(Job).filter(Job.id == job_id).one_or_none()
     if not job:
@@ -171,17 +261,17 @@ async def _run_pipeline_async(db: Session, *, job_id: str, brand_id: str) -> Non
             .all()
         )
 
-        vectors_upserted = await _ingest_stage(
+        ingest_stats = await _ingest_stage(
             brand_id=brand.id,
             sources=sources_for_ingest,
             db=db,
         )
-        job.progress = {**job.progress, "vectors_upserted": vectors_upserted}
+        job.progress = {**job.progress, **ingest_stats}
 
         # ── Complete ─────────────────────────────────────────────────────────
         brand.status = "PENDING_REVIEW"
         job.status = "SUCCEEDED"
-        job.output_payload = {"brand_id": brand.id, "vectors_upserted": vectors_upserted}
+        job.output_payload = {"brand_id": brand.id, **ingest_stats}
         job.finished_at = datetime.now(timezone.utc)
 
         db.add(AuditLog(
@@ -260,25 +350,25 @@ async def _extract_stage(
         raise UnrecoverableError(str(exc)) from exc
 
 
-async def _ingest_stage(*, brand_id: str, sources: list, db) -> int:
+async def _ingest_stage(*, brand_id: str, sources: list, db) -> dict:
+    """Chunk + embed + upsert brand knowledge & DNA into Pinecone.
+
+    Returns a stats dict carrying an explicit `ingest_status` so a skip/failure is
+    visible in the job (progress/output) instead of being silently reported as 0.
+    A failure does NOT block the brand from reaching PENDING_REVIEW (review should
+    not be hostage to a vector-store outage) — it's surfaced, not swallowed.
+    """
     from app.config import get_settings
-    from app.services.ingestion import ingest_brand_knowledge
+    from app.services.ingestion import get_pinecone_index, ingest_brand_knowledge
 
     s = get_settings()
     if not s.openai_api_key or not s.pinecone_api_key:
         logger.warning("OPENAI_API_KEY or PINECONE_API_KEY not set — skipping Pinecone ingest")
-        return 0
+        return {"vectors_upserted": 0, "ingest_status": "skipped_no_keys"}
 
     try:
-        from pinecone import Pinecone
-        pc = Pinecone(api_key=s.pinecone_api_key)
-        index = pc.Index(s.pinecone_index_name)
-    except Exception as exc:
-        logger.warning("Pinecone client init failed — skipping ingest: %s", exc)
-        return 0
-
-    try:
-        return await ingest_brand_knowledge(
+        index = get_pinecone_index(s)  # create-if-missing, correct dimension
+        stats = await ingest_brand_knowledge(
             brand_id=brand_id,
             sources=sources,
             db=db,
@@ -286,10 +376,11 @@ async def _ingest_stage(*, brand_id: str, sources: list, db) -> int:
             openai_api_key=s.openai_api_key,
             embedding_model=s.embedding_model,
         )
+        stats["ingest_status"] = "ok"
+        return stats
     except Exception as exc:
-        # Ingest failure is recoverable — brand still gets to PENDING_REVIEW but with 0 vectors
-        logger.error("Pinecone ingest failed for brand %s: %s", brand_id, exc)
-        return 0
+        logger.error("Pinecone ingest failed for brand %s: %s", brand_id, exc, exc_info=True)
+        return {"vectors_upserted": 0, "ingest_status": "failed", "ingest_error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

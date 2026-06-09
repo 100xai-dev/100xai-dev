@@ -35,6 +35,16 @@ class JobDispatcher:
             retry=retry,
         )
 
+    def enqueue_reingest(self, *, job_id: str, brand_id: str, max_retries: int = 2) -> None:
+        """Re-embed an existing brand's knowledge + DNA (no re-crawl). Onboarding queue."""
+        retry = _maybe_retry(max_retries)
+        queue.get_queue(queue.ONBOARDING_QUEUE).enqueue(
+            "worker.tasks.onboarding.run_reingest",
+            kwargs={"job_id": job_id, "brand_id": brand_id},
+            job_id=job_id,
+            retry=retry,
+        )
+
     def enqueue_purge(self, *, job_id: str, brand_id: str) -> None:
         queue.get_queue(queue.PURGE_QUEUE).enqueue(
             "worker.tasks.purge.purge_brand",

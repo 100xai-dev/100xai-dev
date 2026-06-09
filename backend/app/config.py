@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     pinecone_api_key: str | None = None
     pinecone_index_name: str = "100xai-brand-knowledge"
+    # Serverless spec used only when the index must be created (create-if-missing).
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
     s3_bucket: str = "100xai-uploads"
     crawler_user_agent: str = "100xAI-Crawler/1.0 (+https://100xai.example/bot)"
     crawler_max_pages: int = 20

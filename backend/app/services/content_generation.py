@@ -251,13 +251,30 @@ def compile_serp_metadata(serp_analyses: List[SerpAnalysis]) -> Dict:
         "analysis_date": max(s.created_at for s in serp_analyses) if serp_analyses else None
     }
 
+def _brand_knowledge_block(brand_knowledge: str) -> str:
+    """Render retrieved brand knowledge as a prompt block, or '' when empty.
+
+    When empty, the prompt is byte-identical to the pre-RAG version (backward
+    compatible for brands without ingested vectors).
+    """
+    if not brand_knowledge or not brand_knowledge.strip():
+        return ""
+    return (
+        "\nBRAND KNOWLEDGE (verified facts from this brand's own material — "
+        "ground the content in these and do not contradict or invent details):\n"
+        f"{brand_knowledge.strip()}\n"
+    )
+
+
 async def generate_content_brief(
     serp_data: SerpAnalysisData,
     brand_profile: BrandProfile,
-    target_keyword: str
+    target_keyword: str,
+    brand_knowledge: str = ""
 ) -> ContentBrief:
-    """AI · reads brand profile + serp data → content brief"""
-    
+    """AI · reads brand profile + serp data (+ retrieved brand knowledge) → content brief"""
+
+    knowledge_block = _brand_knowledge_block(brand_knowledge)
     prompt = f"""Generate a comprehensive content brief for a blog article.
 
 BRAND PROFILE:
@@ -275,7 +292,7 @@ COMPETITIVE INTELLIGENCE:
 - Competitor Gaps: {', '.join(serp_data.competitor_gaps[:5])}
 - Our Advantages: {', '.join(serp_data.competitive_advantages[:3])}
 - Market Context: {serp_data.serp_metadata}
-
+{knowledge_block}
 Generate a content brief with:
 1. Content goal and type
 2. Target audience
@@ -427,12 +444,16 @@ async def generate_body_sections(
     content_brief: ContentBrief,
     brand_profile: BrandProfile,
     keyword: str = None,
-    sub_keywords: List[str] = None
+    sub_keywords: List[str] = None,
+    brand_knowledge: str = ""
 ) -> List[GeneratedSection]:
     """Track 2 · body - Split sections → Loop per section"""
-    
+
     sub_keywords = sub_keywords or []
-    
+    # Use a tighter grounding budget per section since this prompt runs once per
+    # section (~8-10x); the shared string was already retrieved once per article.
+    knowledge_block = _brand_knowledge_block(brand_knowledge[:2400] if brand_knowledge else "")
+
     async def generate_single_section(section: ValidatedSection) -> GeneratedSection:
         # Distribute sub-keywords across sections
         section_sub_keywords = sub_keywords[section.index:section.index+3] if sub_keywords else []
@@ -454,7 +475,7 @@ CONTENT BRIEF:
 BRAND VOICE:
 - Tone: {brand_profile.tone_rules}
 - Unique Angle: {brand_profile.unique_angle}
-
+{knowledge_block}
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword if keyword else 'N/A'}
 - Include main keyword 2-4 times naturally (targeting 2% density overall)
@@ -654,10 +675,14 @@ Return the complete FAQ section in HTML with schema markup."""
 async def generate_brand_value_section(
     keyword: str,
     brand_profile: BrandProfile,
-    content_brief: ContentBrief
+    content_brief: ContentBrief,
+    brand_knowledge: str = ""
 ) -> str:
     """Generate 'How [Brand] helps you in this' section"""
-    
+
+    proof_points = getattr(brand_profile, "proof_points", None) or []
+    proof_line = f"- Proof Points: {', '.join(proof_points)}\n" if proof_points else ""
+    knowledge_block = _brand_knowledge_block(brand_knowledge)
     prompt = f"""Write a compelling section explaining how {brand_profile.name} specifically helps with {keyword}.
 
 BRAND CONTEXT:
@@ -667,7 +692,7 @@ BRAND CONTEXT:
 - Unique Angle: {brand_profile.unique_angle}
 - Tone: {brand_profile.tone_rules}
 - CTAs: {', '.join(brand_profile.ctas)}
-
+{proof_line}{knowledge_block}
 CONTENT CONTEXT:
 - Topic: {keyword}
 - Goal: {content_brief.goal}
@@ -1440,7 +1465,13 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         # Keywords are now tuples: (keyword, score, volume, difficulty)
         sub_keywords = [kw[0] for kw in serp_data.keywords[:15] if kw[0] != target_keyword]  # Top 15 sub-keywords
         logger.info(f"Extracted {len(sub_keywords)} sub-keywords for optimization")
-        
+
+        # 02b. Retrieve brand knowledge (RAG) ONCE per article to ground generation.
+        # Additive: empty string when keys/index/chunks are unavailable.
+        from app.services.retrieval import retrieve_brand_grounding
+        brand_knowledge = await retrieve_brand_grounding(job.brand_id, target_keyword, db, top_k=6)
+        logger.info(f"Brand grounding retrieved: {len(brand_knowledge)} chars")
+
         # Log keyword intelligence if available
         if serp_data.keywords:
             top_kw = serp_data.keywords[0]
@@ -1449,7 +1480,7 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         
         # 03. Generate content brief
         logger.info("Generating content brief...")
-        content_brief = await generate_content_brief(serp_data, brand_profile, target_keyword)
+        content_brief = await generate_content_brief(serp_data, brand_profile, target_keyword, brand_knowledge)
         logger.info(f"Content brief generated: {content_brief.goal}")
         
         # 04. Generate meta & outline
@@ -1469,7 +1500,7 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         # 07. Parallel content generation with keyword optimization
         logger.info("Starting parallel content generation with keyword optimization...")
         intro_task = generate_introduction(content_brief, brand_profile, target_keyword, sub_keywords)
-        body_task = generate_body_sections(validated_outline, content_brief, brand_profile, target_keyword, sub_keywords)
+        body_task = generate_body_sections(validated_outline, content_brief, brand_profile, target_keyword, sub_keywords, brand_knowledge)
         
         introduction, body_sections = await asyncio.gather(intro_task, body_task)
         logger.info(f"Generated introduction and {len(body_sections)} body sections with keyword optimization")
@@ -1478,7 +1509,7 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         logger.info("Generating TOC, conclusion, brand value section, and FAQ...")
         toc_task = generate_table_of_contents(body_sections)
         conclusion_task = generate_conclusion(content_brief, brand_profile, body_sections, target_keyword, sub_keywords)
-        brand_value_task = generate_brand_value_section(target_keyword, brand_profile, content_brief)
+        brand_value_task = generate_brand_value_section(target_keyword, brand_profile, content_brief, brand_knowledge)
         faq_task = generate_faq_section(target_keyword, sub_keywords, content_brief, brand_profile, body_sections)
         
         toc, conclusion, brand_value_section, faq_section = await asyncio.gather(toc_task, conclusion_task, brand_value_task, faq_task)

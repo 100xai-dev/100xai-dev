@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.deps import get_current_user, get_db, CurrentUser
-from app.models import Brand, BrandKnowledgeSource, AuditLog
+from app.models import Brand, BrandKnowledgeSource, AuditLog, Job
 from app.models.base import uuid_str
+from app.services.job_dispatcher import JobDispatcher
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/brands/{brand_id}/sources", tags=["brand-sources"])
@@ -125,3 +126,53 @@ def add_source(
 
     db.commit()
     return {"source_id": source.id, "ingest_job_id": None}  # ingest job wiring added when worker is up
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/brands/:id/sources/reingest — re-embed existing sources + DNA into Pinecone
+# ---------------------------------------------------------------------------
+
+@router.post("/reingest", status_code=202)
+def reingest_sources(
+    brand_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Re-run the embedding/ingest stage for a brand's existing knowledge sources.
+
+    Idempotent (the ingest clears the namespace first). Use this to backfill brands
+    whose vectors never landed, without re-crawling/re-extracting.
+    """
+    brand = _get_brand_scoped(brand_id, db, current_user.org_id)
+
+    sources_count = (
+        db.query(BrandKnowledgeSource)
+        .filter(BrandKnowledgeSource.brand_id == brand_id)
+        .count()
+    )
+    if sources_count == 0:
+        raise HTTPException(status_code=400, detail="No knowledge sources to ingest")
+
+    job = Job(
+        id=uuid_str(),
+        org_id=brand.org_id,
+        brand_id=brand_id,
+        job_type="reingest",
+        status="QUEUED",
+        stage="INGEST",
+        input_payload={"brand_id": brand_id},
+    )
+    db.add(job)
+    db.add(AuditLog(
+        org_id=brand.org_id,
+        user_id=current_user.id,
+        brand_id=brand_id,
+        action="brand.reingest_requested",
+        resource_type="job",
+        resource_id=job.id,
+        metadata_json={"sources_count": sources_count},
+    ))
+    db.commit()
+
+    JobDispatcher().enqueue_reingest(job_id=job.id, brand_id=brand_id)
+    return {"job_id": job.id, "sources_count": sources_count}
