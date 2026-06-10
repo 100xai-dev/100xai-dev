@@ -13,11 +13,13 @@ export type UserOut = {
   email: string;
   role: string;
   org_id: string;
+  email_verified: boolean;
 };
 
 export type OrgOut = {
   id: string;
   name: string;
+  plan_code: string;
 };
 
 export type AuthResponse = {
@@ -25,7 +27,37 @@ export type AuthResponse = {
   organization: OrgOut;
   access_token: string;
   refresh_token: string;
+  terms_acceptance_required: boolean;
+  terms_current_version: string | null;
 };
+
+export type SignupResponse = {
+  user: UserOut;
+  organization: OrgOut;
+  requires_verification: boolean;
+};
+
+export interface PlanOut {
+  code: string;
+  name: string;
+  price_inr: number;
+  limits: Record<string, number>;
+  subscribable: boolean;
+}
+
+export interface SubscriptionOut {
+  status: string;
+  plan_code: string;
+  razorpay_subscription_id: string | null;
+  current_period_end: string | null;
+}
+
+export interface BillingSubscriptionResponse {
+  plan_code: string;
+  plan_name: string;
+  limits: Record<string, number>;
+  subscription: SubscriptionOut | null;
+}
 
 export type DnaSource = "crawl" | "manual";
 

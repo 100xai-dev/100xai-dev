@@ -25,6 +25,8 @@ type AuthState = {
 type AuthContextValue = AuthState & {
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string, orgName: string) => Promise<void>;
+  verifyEmail: (token: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   getToken: () => Promise<string | null>;
 };
@@ -69,11 +71,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
-      const err = (await res.json()) as { detail?: string };
-      throw new Error(err.detail ?? "Login failed");
+      const err = (await res.json().catch(() => ({}))) as {
+        detail?: string | { code?: string; email?: string };
+      };
+      // Unverified accounts are blocked at login — route to the verify-email notice.
+      if (res.status === 403 && typeof err.detail === "object" && err.detail?.code === "email_not_verified") {
+        router.push(`/verify-email?email=${encodeURIComponent(err.detail.email ?? email)}`);
+        return;
+      }
+      throw new Error(typeof err.detail === "string" ? err.detail : "Login failed");
     }
     applySession(await res.json() as AuthResponse);
     router.push("/brands");
+    // Invalidate the Next.js Router Cache so server components (e.g. /brands)
+    // re-render with the new session instead of replaying the prior user's RSC.
+    router.refresh();
   }, [applySession, router]);
 
   const signup = useCallback(async (
@@ -85,15 +97,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await fetch(`${BACKEND}/v1/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password, organization_name: orgName }),
+      body: JSON.stringify({ name, email, password, organization_name: orgName, accept_terms: true }),
     });
     if (!res.ok) {
-      const err = (await res.json()) as { detail?: string };
-      throw new Error(err.detail ?? "Signup failed");
+      const err = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(typeof err.detail === "string" ? err.detail : "Signup failed");
+    }
+    // No session is issued until the email is verified.
+    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+  }, [router]);
+
+  const verifyEmail = useCallback(async (token: string) => {
+    const res = await fetch(`${BACKEND}/v1/auth/verify-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(typeof err.detail === "string" ? err.detail : "Verification failed");
     }
     applySession(await res.json() as AuthResponse);
     router.push("/brands");
+    router.refresh();
   }, [applySession, router]);
+
+  const resendVerification = useCallback(async (email: string) => {
+    await fetch(`${BACKEND}/v1/auth/resend-verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).catch(() => {});
+  }, []);
 
   const logout = useCallback(async () => {
     const refreshToken = getRefreshToken();
@@ -107,6 +142,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearSession();
     setState({ user: null, org: null, accessToken: null, loading: false });
     router.push("/login");
+    // Clear cached server-rendered routes so the next user can't see stale brands.
+    router.refresh();
   }, [router]);
 
   const getToken = useCallback(async () => {
@@ -122,7 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [state.accessToken]);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, signup, logout, getToken }}>
+    <AuthContext.Provider value={{ ...state, login, signup, verifyEmail, resendVerification, logout, getToken }}>
       {children}
     </AuthContext.Provider>
   );

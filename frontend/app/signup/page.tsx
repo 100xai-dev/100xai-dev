@@ -14,6 +14,7 @@ export default function SignupPage() {
     confirmPassword: "",
     organizationName: "",
   });
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -36,6 +37,10 @@ export default function SignupPage() {
     }
     if (form.password.length < 8) {
       setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (!acceptedTerms) {
+      setError("You must accept the Terms & Conditions to continue.");
       return;
     }
 
@@ -118,13 +123,29 @@ export default function SignupPage() {
             />
           </label>
 
+          <label style={{ display: "flex", flexDirection: "row", alignItems: "flex-start", gap: "8px" }}>
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              style={{ width: "auto", marginTop: "4px" }}
+            />
+            <span className="meta" style={{ fontSize: "0.8rem" }}>
+              I agree to the{" "}
+              <Link href="/terms" target="_blank" style={{ color: "var(--accent)" }}>
+                Terms &amp; Conditions
+              </Link>
+              .
+            </span>
+          </label>
+
           {error && (
             <p className="text-danger" role="alert" aria-live="assertive">
               {error}
             </p>
           )}
 
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={loading || !acceptedTerms}>
             {loading ? "Creating account..." : "Create account"}
           </button>
         </form>

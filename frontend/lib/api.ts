@@ -2,14 +2,15 @@ import { getBackendBaseUrl } from "@/lib/config";
 import type { BlogJobOut } from "@/lib/types";
 import type {
   ApproveBrandResponse,
+  BillingSubscriptionResponse,
   BrandCreateRequest,
   BrandCreateResponse,
   BrandListResponse,
   BrandProfileContent,
   BrandProfileFull,
   BrandSummary,
-  DeleteBrandResponse,
   JobRead,
+  PlanOut,
 } from "@/lib/types";
 
 type RequestOptions = {
@@ -76,8 +77,8 @@ export async function createBrand(payload: BrandCreateRequest): Promise<BrandCre
   return apiRequest<BrandCreateResponse>("/v1/brands", { method: "POST", body: payload });
 }
 
-export async function requestBrandDelete(brandId: string): Promise<DeleteBrandResponse> {
-  return apiRequest<DeleteBrandResponse>(`/v1/brands/${brandId}`, { method: "DELETE" });
+export async function requestBrandDelete(brandId: string): Promise<void> {
+  await apiRequest<void>(`/v1/brands/${brandId}`, { method: "DELETE" });
 }
 
 export async function getBrandProfile(brandId: string): Promise<BrandProfileFull> {
@@ -189,6 +190,27 @@ export async function getKeywordStats(brandId: string): Promise<{
   completion_rate: number;
 }> {
   return apiRequest(`/v1/brands/${brandId}/keywords/stats`);
+}
+
+// Billing
+export async function listPlans(): Promise<{ plans: PlanOut[] }> {
+  return apiRequest<{ plans: PlanOut[] }>("/v1/billing/plans");
+}
+
+export async function getSubscription(): Promise<BillingSubscriptionResponse> {
+  return apiRequest<BillingSubscriptionResponse>("/v1/billing/subscription");
+}
+
+export async function subscribeToPlan(planCode: string): Promise<{
+  subscription_id: string;
+  key_id: string;
+  plan_code: string;
+}> {
+  return apiRequest("/v1/billing/subscribe", { method: "POST", body: { plan_code: planCode } });
+}
+
+export async function cancelSubscription(): Promise<null> {
+  return apiRequest("/v1/billing/cancel", { method: "POST" });
 }
 
 // SERP Analysis (Pipeline 2)

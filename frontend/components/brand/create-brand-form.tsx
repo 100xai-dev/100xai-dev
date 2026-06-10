@@ -24,7 +24,7 @@ export function CreateBrandForm() {
     setError("");
     try {
       const response = await createBrand({ name, website_url: website_url || undefined, dna_source });
-      router.push(`/brands/${response.brand_id}`);
+      router.push(`/brands/${response.brand_id}/onboarding`);
       router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Failed to create brand");

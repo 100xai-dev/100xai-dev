@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { AuthProvider } from "@/context/AuthContext";
 import { LogoutButton } from "@/components/LogoutButton";
+import { TermsGuard } from "@/components/TermsGuard";
 import "./globals.css";
 
 const sans = DM_Sans({
@@ -46,6 +47,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link className="topbar-link" href="/brands">
                 Dashboard
               </Link>
+              <Link className="topbar-link" href="/billing">
+                Billing
+              </Link>
               <Link className="topbar-link primary" href="/brands/new">
                 + New Brand
               </Link>
@@ -53,6 +57,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </nav>
           </header>
           <main>{children}</main>
+          <TermsGuard />
         </div>
         </AuthProvider>
       </body>
