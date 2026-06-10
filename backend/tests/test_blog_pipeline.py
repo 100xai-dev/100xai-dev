@@ -163,3 +163,32 @@ def test_outline_falls_back_instead_of_crashing() -> None:
 def test_outline_skips_malformed_sections() -> None:
     o = parse_and_validate_outline({"sections": [{"heading": "A"}, {"no": "heading"}, "B"]})
     assert [s.heading for s in o.sections] == ["A", "B"]
+
+
+# --- LLM type-variance coercion (regression for the ContentBrief ValidationError:
+#     target_audience returned as a list, target_word_count as a "2400-2800" range) ---
+
+from app.services.content_generation import ContentBrief, ValidatedSection
+
+
+def test_content_brief_coerces_list_audience_and_range_word_count() -> None:
+    cb = ContentBrief(
+        goal="g", content_type="blog_post",
+        target_audience=["Urban homeowners", "wellness seekers"],  # list -> joined str
+        search_intent="informational",
+        target_word_count="2400-2800",                              # range -> midpoint int
+        content_angle="guide",
+        ctas="Shop now",                                            # str -> [str]
+        sections=["Intro", {"heading": "Body"}],                    # mixed -> list[dict]
+    )
+    assert cb.target_audience == "Urban homeowners, wellness seekers"
+    assert cb.target_word_count == 2600
+    assert cb.ctas == ["Shop now"]
+    assert cb.sections == [{"heading": "Intro"}, {"heading": "Body"}]
+
+
+def test_validated_section_coerces_variant_types() -> None:
+    vs = ValidatedSection(index=0, heading=["A", "B"], phases="Explain", estimated_words="250-350")
+    assert vs.heading == "A, B"
+    assert vs.phases == ["Explain"]
+    assert vs.estimated_words == 300  # midpoint of 250-350

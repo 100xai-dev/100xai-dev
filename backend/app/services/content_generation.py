@@ -6,7 +6,7 @@ import re
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.config import get_settings
 from app.models.blog import BlogJob, BlogBrief, BlogSection, BlogDraft
@@ -40,6 +40,52 @@ JOB_STAGE_DRAFT = "DRAFT"
 JOB_STAGE_IMAGE = "IMAGE"
 JOB_STAGE_COMPLETE = "COMPLETE"
 
+# --- Coercion helpers for LLM-supplied JSON --------------------------------
+# LLMs return semantically-correct but shape-variant values (a list of personas
+# for a string field, a "2400-2800" range for an int). These normalize such
+# values so a single noncompliant field doesn't crash the whole pipeline.
+
+def _coerce_str(value) -> str:
+    """List -> comma-joined string; None -> ''; anything else -> str()."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value if v is not None)
+    return str(value)
+
+
+def _coerce_int(value, default: int) -> int:
+    """Parse ints, floats, and strings like '2400-2800' (range -> midpoint)."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, (list, tuple)) and value:
+        return _coerce_int(value[0], default)
+    if isinstance(value, str):
+        nums = [int(n) for n in re.findall(r"\d+", value)]
+        if nums:
+            return sum(nums) // len(nums) if len(nums) > 1 else nums[0]
+    return default
+
+
+def _coerce_dict_list(value) -> list:
+    """Normalize a sections list so each item is a dict (wrap bare strings)."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    out = []
+    for item in value:
+        if isinstance(item, dict):
+            out.append(item)
+        elif isinstance(item, str) and item.strip():
+            out.append({"heading": item.strip()})
+    return out
+
+
 # Content generation data models
 class SerpAnalysisData(BaseModel):
     keywords: List[tuple[str, Optional[float], Optional[int], Optional[float]]]  # (keyword, score, volume, difficulty)
@@ -57,6 +103,29 @@ class ContentBrief(BaseModel):
     ctas: List[str]
     sections: List[dict]
 
+    @field_validator("goal", "content_type", "target_audience", "search_intent",
+                     "content_angle", mode="before")
+    @classmethod
+    def _coerce_text(cls, v):
+        return _coerce_str(v)
+
+    @field_validator("target_word_count", mode="before")
+    @classmethod
+    def _coerce_word_count(cls, v):
+        return _coerce_int(v, 2000)
+
+    @field_validator("ctas", mode="before")
+    @classmethod
+    def _coerce_ctas(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _coerce_sections(cls, v):
+        return _coerce_dict_list(v)
+
 class MetaAndOutline(BaseModel):
     slug: str
     meta_title: str
@@ -64,12 +133,41 @@ class MetaAndOutline(BaseModel):
     h1: str
     sections: List[dict]
 
+    @field_validator("slug", "meta_title", "meta_description", "h1", mode="before")
+    @classmethod
+    def _coerce_text(cls, v):
+        return _coerce_str(v)
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _coerce_sections(cls, v):
+        return _coerce_dict_list(v)
+
 class ValidatedSection(BaseModel):
     index: int
     heading: str
     heading_type: str = "h2"
     phases: List[str]
     estimated_words: int = 300
+
+    @field_validator("heading", "heading_type", mode="before")
+    @classmethod
+    def _coerce_text(cls, v):
+        return _coerce_str(v)
+
+    @field_validator("phases", mode="before")
+    @classmethod
+    def _coerce_phases(cls, v):
+        if isinstance(v, str):
+            return [v] if v.strip() else ["Introduce topic", "Provide details", "Conclude"]
+        if isinstance(v, (list, tuple)):
+            return [str(p) for p in v if p is not None]
+        return ["Introduce topic", "Provide details", "Conclude"]
+
+    @field_validator("estimated_words", mode="before")
+    @classmethod
+    def _coerce_words(cls, v):
+        return _coerce_int(v, 300)
 
 class ValidatedOutline(BaseModel):
     sections: List[ValidatedSection]
