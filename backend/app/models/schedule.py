@@ -14,7 +14,8 @@ from app.models.base import Base, TimestampMixin, utcnow, uuid_str
 class ScheduleStatus(str, Enum):
     """Status of a scheduled post."""
     DRAFT = "DRAFT"                    # Content being created/edited
-    SCHEDULED = "SCHEDULED"            # Scheduled for future publishing
+    SCHEDULED = "SCHEDULED"            # Generation queued; draft not ready yet
+    PENDING_APPROVAL = "PENDING_APPROVAL"  # Draft generated; awaiting human review
     PUBLISHING = "PUBLISHING"          # Currently being published
     PUBLISHED = "PUBLISHED"            # Successfully published
     FAILED = "FAILED"                  # Publishing failed

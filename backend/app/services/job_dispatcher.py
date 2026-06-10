@@ -147,6 +147,21 @@ class JobDispatcher:
             retry=retry,
         )
 
+    def enqueue_publish_approved_schedule(self, *, schedule_id: str, max_retries: int = 2) -> None:
+        """Publish a reviewer-approved schedule across its target channels.
+
+        Replaces the old time-triggered auto-publish: a schedule only reaches this
+        path once a human approves the generated draft (see schedules.approve).
+        """
+        retry = _maybe_retry(max_retries)
+        queue.get_queue(PUBLISHER_QUEUE).enqueue(
+            "worker.tasks.scheduler.publish_approved_schedule",
+            kwargs={"schedule_id": schedule_id},
+            job_id=f"publish_approved_{schedule_id}",
+            job_timeout=600,
+            retry=retry,
+        )
+
     def enqueue_retry_publishing(self, *, schedule_id: str, max_retries: int = 3) -> None:
         """Enqueue retry publishing task for a failed schedule."""
         retry = _maybe_retry(max_retries)

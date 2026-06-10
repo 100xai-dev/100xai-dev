@@ -792,85 +792,187 @@ def safe_json_parse(json_str: str) -> dict | list | None:
 # Pipeline 1: AI Filtering
 # ---------------------------------------------------------------------------
 
-async def filter_keywords_for_relevance(keywords: list[dict], brand_context: str, business_description: str) -> list[dict]:
-    """Use AI to filter keywords for brand relevance and commercial intent."""
+async def filter_keywords_for_relevance(keywords: list[dict], allowed_topics: list[str]) -> list[dict]:
+    """Use AI to filter keywords to only those matching the client's allowed_topics list (AI #1)."""
     if not keywords:
         return []
-        
-    # Import LLM service
+    if not allowed_topics:
+        logger.warning("No allowed_topics provided, skipping AI keyword filter")
+        return keywords
+
     from app.services.llm import LLMService
-    
-    # Prepare keyword list for analysis (limit to prevent token overflow)
-    keyword_batch = keywords[:100]  # Process in batches for large lists
-    keyword_list = "\n".join([f"- {k['related_keyword']} (vol: {k.get('search_volume', 'N/A')})" for k in keyword_batch])
-    
-    prompt = f"""You are an SEO keyword analyst. Analyze the following keywords for relevance to the given brand.
 
-BRAND CONTEXT:
-{brand_context}
+    keyword_batch = keywords[:100]
+    keyword_strings = [k["related_keyword"] for k in keyword_batch]
+    keyword_list = "\n".join(keyword_strings)
+    topics_block = "\n".join(f"- {t}" for t in allowed_topics)
 
-BUSINESS DESCRIPTION:
-{business_description}
+    prompt = f"""I'm doing SEO keyword research. From the following keyword list, remove any keyword that is NOT relevant to these topics:
+{topics_block}
 
-KEYWORDS TO ANALYZE:
+Remove anything unrelated (generic lifestyle, unrelated industries, irrelevant consumer topics).
+
+Keywords to filter:
 {keyword_list}
 
-INSTRUCTIONS:
-1. Filter keywords that are relevant to this brand's business, products, or services
-2. Prioritize keywords with commercial intent (buying signals, product searches, service inquiries)
-3. Exclude generic, overly broad, or completely unrelated keywords
-4. Include informational keywords that could drive qualified traffic
-
-Return ONLY a JSON array of relevant keyword strings in this exact format:
-["keyword1", "keyword2", "keyword3"]
-
-Do not include explanations or additional text."""
+Return ONLY the remaining keywords as a JSON array. Keep wording and casing EXACTLY as provided. Do not add, rewrite, or translate keywords.
+["keyword1", "keyword2", ...]"""
 
     try:
         llm = LLMService()
         response = await llm.call("anthropic/claude-haiku-4-5-20251001", prompt)
-        
-        # Parse the response to get the filtered keyword list
-        relevant_keywords = safe_json_parse(response.strip())
-        
-        if not isinstance(relevant_keywords, list):
-            logger.warning("LLM returned invalid format for keyword filtering")
-            return keywords  # Return original if filtering fails
-        
-        # Filter original keywords to match AI-selected ones
-        relevant_set = set(kw.lower() for kw in relevant_keywords)
-        filtered = [k for k in keyword_batch if k["related_keyword"].lower() in relevant_set]
-        
-        logger.info(f"AI filtered {len(keyword_batch)} keywords down to {len(filtered)} relevant ones")
+        kept = safe_json_parse(response.strip())
+        if not isinstance(kept, list):
+            logger.warning("AI keyword filter returned invalid format, skipping filter")
+            return keywords
+        kept_set = {kw.strip().lower() for kw in kept}
+        filtered = [k for k in keyword_batch if k["related_keyword"].strip().lower() in kept_set]
+        logger.info(f"AI keyword filter: {len(keyword_batch)} → {len(filtered)} kept")
         return filtered
-        
     except Exception as exc:
         logger.warning(f"AI keyword filtering failed: {exc}")
-        return keywords  # Return original keywords if AI filtering fails
+        return keywords
+
+
+async def select_primary_target_keyword(
+    primary_keyword: str,
+    scored_keywords: list[dict],
+    candidate_limit: int = 15,
+) -> str:
+    """AI selection layer (AI #2): pick the single best target keyword.
+
+    From the score-sorted candidates, choose the one that best balances relevance to the
+    user's seed keyword against search traffic (balanced trade-off): stay on the user's
+    intent, allowing modest broadening only when the traffic gain is large and the topic
+    is still clearly relevant. Falls back to the highest-scoring keyword when the LLM is
+    unavailable or returns something not in the candidate set.
+    """
+    if not scored_keywords:
+        return primary_keyword
+
+    # Caller has already sorted by composite score; cap to keep the prompt small.
+    candidates = scored_keywords[:candidate_limit]
+    valid = {k["related_keyword"].strip().lower() for k in candidates}
+    fallback = candidates[0]["related_keyword"]
+
+    from app.services.llm import LLMService
+
+    lines = []
+    for k in candidates:
+        vol = k.get("search_volume")
+        diff = k.get("keyword_difficulty")
+        lines.append(
+            f'- "{k["related_keyword"]}" '
+            f'(monthly searches: {vol if vol is not None else "unknown"}, '
+            f'difficulty: {diff if diff is not None else "unknown"})'
+        )
+    candidate_block = "\n".join(lines)
+
+    prompt = f"""You are choosing the single best blog target keyword for an SEO content pipeline.
+
+The user's seed keyword (their actual intent) is:
+"{primary_keyword}"
+
+Candidate keywords with monthly search volume and difficulty:
+{candidate_block}
+
+Pick the ONE keyword that best balances:
+1. Relevance — it must stay clearly on the user's seed intent; do not drift to a different topic.
+2. Traffic — prefer higher monthly search volume (and lower difficulty as a tiebreaker).
+
+Allow modest broadening (e.g. dropping a narrow qualifier) ONLY when the traffic gain is large AND the topic is still clearly what the user asked about. When in doubt, stay closer to the seed.
+
+Return ONLY a JSON object, no prose:
+{{"keyword": "<exact keyword copied from the candidate list>", "reason": "<one short sentence>"}}"""
+
+    try:
+        llm = LLMService()
+        response = await llm.call("anthropic/claude-haiku-4-5-20251001", prompt)
+        parsed = safe_json_parse(response.strip())
+        if isinstance(parsed, dict):
+            chosen = str(parsed.get("keyword", "")).strip()
+            if chosen.lower() in valid:
+                logger.info(
+                    f"AI keyword selection: '{primary_keyword}' → '{chosen}' "
+                    f"({parsed.get('reason', '')})"
+                )
+                return chosen
+        logger.warning("AI keyword selection returned an unusable result; using top score")
+    except Exception as exc:
+        logger.warning(f"AI keyword selection failed: {exc}")
+    return fallback
+
+
+def _trigger_content_generation_directly(db, parent_job, keyword: str, parent_payload: dict) -> None:
+    """Create + enqueue a Pipeline 3 content job directly, bypassing SERP analysis.
+
+    Fallback for when keyword research returns too few keywords for a meaningful SERP
+    step (P2 needs >= 3) but a draft is still expected (blog-originated jobs). The new
+    content job's id is recorded on ``parent_job.output_payload.auto_triggered_content_job``
+    so the blogs status sync can track P3 progress/failure, and ``blog_job_id`` is
+    propagated so the draft links back to the originating BlogJob.
+    """
+    from app.services.job_dispatcher import JobDispatcher
+    from app.models.base import uuid_str
+    from app.models.onboarding import Job, BrandProfile
+    from app.services.content_generation import JOB_STAGE_CONTENT
+
+    if not db.query(BrandProfile).filter(BrandProfile.brand_id == parent_job.brand_id).first():
+        logger.warning(f"Brand profile missing for {parent_job.brand_id}; skipping content trigger")
+        return
+
+    content_payload = {
+        "keyword": keyword,
+        "auto_triggered": True,
+        "skipped_serp": True,
+        "created_by": parent_payload.get("created_by", "system"),
+        "blog_job_id": parent_payload.get("blog_job_id"),
+        "blog_integration": True,
+    }
+    content_job = Job(
+        id=uuid_str(),
+        org_id=parent_job.org_id,
+        brand_id=parent_job.brand_id,
+        job_type="content_generation",
+        stage=JOB_STAGE_CONTENT,
+        status="QUEUED",
+        input_payload=content_payload,
+    )
+    db.add(content_job)
+    parent_job.output_payload = dict(
+        parent_job.output_payload or {}, auto_triggered_content_job=content_job.id
+    )
+    db.commit()
+
+    JobDispatcher().enqueue_content_generation(
+        job_id=content_job.id,
+        brand_id=parent_job.brand_id,
+        keyword=keyword,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Pipeline 1: Main Keyword Research Function
 # ---------------------------------------------------------------------------
 
-async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str, brand_context: str, business_description: str) -> dict:
+async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str, brand_context: str = "", business_description: str = "") -> dict:
     """
     Main Pipeline 1 function: Research keywords for a given brand and primary keyword.
-    
+
     Args:
         job_id: The job ID from the jobs table
-        brand_id: The brand ID 
+        brand_id: The brand ID
         primary_keyword: The seed keyword to research
-        brand_context: Brand DNA context for AI filtering
-        business_description: Business description for relevance filtering
-        
+        brand_context: Unused (kept for backwards-compat). allowed_topics loaded from BrandProfile.
+        business_description: Unused (kept for backwards-compat).
+
     Returns:
         dict with statistics about the keyword research process
     """
     from sqlalchemy.orm import Session
     from app.db import get_db
     from app.models.keyword import Keyword
-    from app.models.onboarding import Job
+    from app.models.onboarding import Job, BrandProfile
     
     logger.info(f"Starting keyword research for job {job_id}, brand {brand_id}, keyword '{primary_keyword}'")
     
@@ -925,12 +1027,19 @@ async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str,
         deduped_keywords = dedupe_by(all_keywords, "related_keyword")
         logger.info(f"Deduplicated to {len(deduped_keywords)} unique keywords")
         
-        # Step 3: AI-based relevance filtering
-        if brand_context and business_description:
-            logger.info("Applying AI relevance filtering...")
-            filtered_keywords = await filter_keywords_for_relevance(deduped_keywords, brand_context, business_description)
+        # Step 3: AI-based relevance filtering using client's allowed_topics list (AI #1)
+        db_early = next(get_db())
+        try:
+            profile = db_early.query(BrandProfile).filter(BrandProfile.brand_id == brand_id).first()
+            allowed_topics = profile.allowed_topics if (profile and profile.allowed_topics) else []
+        finally:
+            db_early.close()
+
+        if allowed_topics:
+            logger.info(f"Applying AI keyword filter against {len(allowed_topics)} allowed topics...")
+            filtered_keywords = await filter_keywords_for_relevance(deduped_keywords, allowed_topics)
         else:
-            logger.warning("No brand context provided, skipping AI filtering")
+            logger.warning("No allowed_topics on BrandProfile, skipping AI keyword filter")
             filtered_keywords = deduped_keywords
             
         logger.info(f"AI filtered to {len(filtered_keywords)} relevant keywords")
@@ -1004,21 +1113,46 @@ async def run_keyword_research(job_id: str, brand_id: str, primary_keyword: str,
             # Auto-trigger Pipeline 2 (SERP Analysis) if we have enough keywords
             if saved_count >= 3:  # Need at least 3 keywords for meaningful analysis
                 from app.services.job_dispatcher import JobDispatcher
-                
+
                 # Get top 5 keywords for SERP analysis
                 top_keywords = db.query(Keyword).filter(
                     Keyword.job_id == job_id
                 ).order_by(Keyword.score.desc()).limit(5).all()
-                
+
                 if top_keywords:
+                    target_keywords = [k.related_keyword for k in top_keywords]
+
+                    # AI selection layer (AI #2): pick the keyword that best balances
+                    # relevance to the user's seed against traffic, then lead with it so
+                    # the downstream P2→P3 hand-off (which uses target_keywords[0])
+                    # generates content for the AI-chosen topic.
+                    chosen = await select_primary_target_keyword(primary_keyword, scored_keywords)
+                    target_keywords = [chosen] + [k for k in target_keywords if k != chosen]
+
                     dispatcher = JobDispatcher()
                     dispatcher.enqueue_serp_analysis(
                         job_id=job_id,
                         brand_id=brand_id,
-                        target_keywords=[k.related_keyword for k in top_keywords]
+                        target_keywords=target_keywords[:5],
                     )
-                    logger.info(f"Auto-triggered SERP analysis for {len(top_keywords)} top keywords")
-            
+                    logger.info(
+                        f"Auto-triggered SERP analysis; AI-selected primary keyword '{chosen}'"
+                    )
+            elif saved_count >= 1:
+                # Too few keywords for a meaningful SERP analysis (P2 needs >= 3), but a
+                # blog-originated job still expects a draft. Skip P2 and trigger P3
+                # directly on the AI-selected keyword so /blogs never silently stalls.
+                parent_payload = job.input_payload if job else {}
+                if (parent_payload or {}).get("blog_job_id"):
+                    chosen = await select_primary_target_keyword(primary_keyword, scored_keywords)
+                    _trigger_content_generation_directly(
+                        db, job, chosen, parent_payload or {}
+                    )
+                    logger.info(
+                        f"Few keywords ({saved_count}); skipped SERP and triggered content "
+                        f"generation directly on '{chosen}'"
+                    )
+
         except Exception as db_exc:
             logger.error(f"Database error saving keywords: {db_exc}")
             db.rollback()
@@ -1493,8 +1627,8 @@ async def run_serp_analysis(
                         error_message=crawl_result.get("error")
                     )
                     
-                    if crawl_result["success"]:
-                        # Step 6: AI analysis of content
+                    if crawl_result["success"] and crawl_result.get("word_count", 0) >= 400:
+                        # Step 6: AI analysis of content (quality gate: ≥400 words per spec §5.1e)
                         logger.info(f"Analyzing content for {url}")
                         analysis = await analyze_competitor_content(
                             crawl_result["content"],
@@ -1527,9 +1661,13 @@ async def run_serp_analysis(
                         else:
                             competitor_analysis.error_message = analysis.get("error", "Analysis failed")
                             results["failed_crawls"] += 1
+                    elif crawl_result["success"]:
+                        # Crawl succeeded but word count < 400 — thin content, skip analysis
+                        competitor_analysis.error_message = f"Skipped: word count {crawl_result.get('word_count', 0)} < 400"
+                        logger.info(f"Skipped thin-content page ({crawl_result.get('word_count', 0)} words): {url}")
                     else:
                         results["failed_crawls"] += 1
-                    
+
                     competitor_analysis.crawled_at = db.execute(text("SELECT NOW()")).scalar()
                     db.add(competitor_analysis)
                 
@@ -1588,15 +1726,31 @@ async def run_serp_analysis(
                     
                     # Get the top performing keyword from the analysis
                     top_keyword = target_keywords[0] if target_keywords else "content marketing"
-                    
+
                     # Validate brand profile exists for content generation
                     brand_profile_exists = db.query(BrandProfile).filter(BrandProfile.brand_id == job.brand_id).first()
                     if not brand_profile_exists:
                         logger.warning(f"Brand profile not found for {job.brand_id}, skipping auto-trigger")
-                        job.output_payload = dict(job.output_payload or {}, 
+                        job.output_payload = dict(job.output_payload or {},
                                                auto_trigger_skipped="Brand DNA profile required for content generation")
                         db.commit()
                     else:
+                        # Propagate calendar context (blog_job_id, created_by) so Pipeline 3
+                        # can link the generated draft back to the original BlogJob / BlogSchedule.
+                        parent_payload = job.input_payload or {}
+                        blog_job_id = parent_payload.get("blog_job_id")
+
+                        content_payload = {
+                            "keyword": top_keyword,
+                            "serp_analysis_job_id": job_id,
+                            "auto_triggered": True,
+                            "triggered_at": str(db.scalar(text("SELECT NOW()"))),
+                            "created_by": parent_payload.get("created_by", "system"),
+                        }
+                        if blog_job_id:
+                            content_payload["blog_job_id"] = blog_job_id
+                            content_payload["blog_integration"] = True
+
                         # Create content generation job
                         content_job = Job(
                             id=uuid_str(),
@@ -1605,12 +1759,7 @@ async def run_serp_analysis(
                             job_type="content_generation",
                             stage=JOB_STAGE_CONTENT,
                             status="QUEUED",
-                            input_payload={
-                                "keyword": top_keyword,
-                                "serp_analysis_job_id": job_id,
-                                "auto_triggered": True,
-                                "triggered_at": str(db.scalar(text("SELECT NOW()"))),
-                            }
+                            input_payload=content_payload,
                         )
                         db.add(content_job)
                         db.flush()

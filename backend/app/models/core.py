@@ -12,6 +12,7 @@ class Organization(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    plan_code: Mapped[str] = mapped_column(String, nullable=False, default="free")
 
     users: Mapped[list["User"]] = relationship(back_populates="organization")
 
@@ -27,6 +28,12 @@ class User(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String, nullable=False, default="admin")
     org_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
 
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    terms_version_accepted: Mapped[str | None] = mapped_column(String)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     organization: Mapped[Organization] = relationship(back_populates="users")
 
 
@@ -39,6 +46,17 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    user_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
