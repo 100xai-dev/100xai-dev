@@ -17,12 +17,14 @@ COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
 COPY backend /app/backend
-COPY worker /app/worker
 RUN pip install -e ./backend || true
 
-ENV PYTHONPATH=/app/backend:/app
+# Worker tasks live at backend/worker; PYTHONPATH=/app/backend lets both `app.*`
+# and the dispatcher's `worker.tasks.*` string targets resolve to the one tree.
+ENV PYTHONPATH=/app/backend
+WORKDIR /app/backend
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=10 \
-  CMD rq info -u "$REDIS_URL" --only-queues onboarding purge default >/dev/null 2>&1 || exit 1
+  CMD rq info -u "$REDIS_URL" --only-queues onboarding purge default blog keyword_research serp_analysis content_generation publisher >/dev/null 2>&1 || exit 1
 
-CMD ["python", "worker/main.py"]
+CMD ["python", "-m", "worker.main"]

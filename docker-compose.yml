@@ -42,7 +42,7 @@ services:
     healthcheck:
       # rq info exits non-zero if it cannot reach Redis or the worker has no
       # registered queues — meaningful liveness, unlike a bare `print`.
-      test: ["CMD-SHELL", "rq info -u \"$REDIS_URL\" --only-queues onboarding purge default >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "rq info -u \"$REDIS_URL\" --only-queues onboarding purge default blog keyword_research serp_analysis content_generation publisher >/dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 10
