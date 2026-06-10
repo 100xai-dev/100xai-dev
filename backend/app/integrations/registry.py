@@ -8,6 +8,7 @@ from app.integrations.base import (
     ValidationResult,
 )
 from app.integrations.wordpress import WordPressProvider
+from app.integrations.webflow import WebflowProvider
 
 
 class _ProviderStub(IntegrationProvider):
@@ -54,7 +55,7 @@ class UnknownProviderError(Exception):
 PROVIDERS: dict[str, type[IntegrationProvider]] = {
     "wordpress": WordPressProvider,
     "shopify": ShopifyProviderStub,
-    "webflow": WebflowProviderStub,
+    "webflow": WebflowProvider,
     "custom_api": CustomAPIProviderStub,
 }
 

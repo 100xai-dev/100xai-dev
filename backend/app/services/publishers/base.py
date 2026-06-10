@@ -190,6 +190,12 @@ def _register_builtin_publishers():
         PublisherFactory.register_publisher("ghost", GhostPublisher)
     except ImportError:
         logger.warning("Ghost publisher not available")
+    
+    try:
+        from .webflow import WebflowPublisher
+        PublisherFactory.register_publisher("webflow", WebflowPublisher)
+    except ImportError:
+        logger.warning("Webflow publisher not available")
 
 
 # Register publishers on module import

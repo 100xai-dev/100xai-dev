@@ -10,6 +10,9 @@ from .base import (
 )
 from .wordpress import WordPressPublisher
 from .webhook import WebhookPublisher
+from .shopify import ShopifyPublisher
+from .ghost import GhostPublisher
+from .webflow import WebflowPublisher
 
 __all__ = [
     'BasePublisher',
@@ -19,5 +22,8 @@ __all__ = [
     'ContentValidationError',
     'RateLimitError',
     'WordPressPublisher',
-    'WebhookPublisher'
+    'WebhookPublisher',
+    'ShopifyPublisher',
+    'GhostPublisher',
+    'WebflowPublisher'
 ]
