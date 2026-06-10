@@ -18,6 +18,7 @@ const mockBrandsMap: Record<string, any> = {
 };
 
 const tabs = [
+  { num: "00", label: "Setup Wizard", href: (id: string) => `/brands/${id}/onboarding` },
   { num: "01", label: "DNA Review & Curation", href: (id: string) => `/brands/${id}/dna` },
   { num: "02", label: "Manual Profile Input", href: (id: string) => `/brands/${id}/dna/manual` },
   { num: "03", label: "Knowledge Base Sources", href: (id: string) => `/brands/${id}/sources` },
@@ -28,6 +29,7 @@ const tabs = [
   { num: "08", label: "Audit Trail", href: (id: string) => `/brands/${id}/audit` },
   { num: "09", label: "Blog Engine", href: (id: string) => `/brands/${id}/blogs` },
   { num: "10", label: "Content Calendar", href: (id: string) => `/brands/${id}/calendar` },
+  { num: "11", label: "Review & Publish", href: (id: string) => `/brands/${id}/review` },
 ];
 
 export default async function BrandDetailPage({ params }: PageProps) {
@@ -92,6 +94,17 @@ export default async function BrandDetailPage({ params }: PageProps) {
           </div>
         </div>
       </div>
+
+      {/* Setup prompt while the brand isn't fully ready */}
+      {!isDemo && brand.status !== "READY" && (
+        <Link href={`/brands/${brand.id}/onboarding`} className="card" style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, textDecoration: "none", borderColor: "var(--accent-border)", background: "var(--accent-light)" }}>
+          <div>
+            <div style={{ fontWeight: 600, color: "var(--accent)" }}>Finish setting up this brand</div>
+            <div className="meta" style={{ marginTop: 2 }}>Walk through DNA, sources, publishing and your first article.</div>
+          </div>
+          <span className="pill-link" style={{ height: 36 }}>Continue setup →</span>
+        </Link>
+      )}
 
       {/* Navigation tabs */}
       <div>

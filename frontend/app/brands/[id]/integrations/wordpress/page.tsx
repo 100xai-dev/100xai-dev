@@ -63,12 +63,23 @@ export default function WordPressSetupPage() {
     featured_image_support: true
   });
 
+  const [oauthNotice, setOauthNotice] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+
   // Load existing configuration if in edit mode
   useEffect(() => {
     if (editMode) {
       loadExistingConfig();
     }
   }, [editMode]);
+
+  // Surface the result of a WordPress.com OAuth round-trip (set on redirect back).
+  useEffect(() => {
+    if (searchParams.get("wpcom_connected")) {
+      setOauthNotice({ type: "ok", text: "WordPress.com connected successfully. You can now publish to this site." });
+    } else if (searchParams.get("wpcom_error")) {
+      setOauthNotice({ type: "error", text: `WordPress.com connection failed: ${searchParams.get("wpcom_error")}` });
+    }
+  }, [searchParams]);
 
   const loadExistingConfig = async () => {
     try {
@@ -241,9 +252,23 @@ export default function WordPressSetupPage() {
     }
   };
 
-  const startOAuthFlow = () => {
-    // This would typically redirect to WordPress.com OAuth or show OAuth instructions
-    setError("OAuth flow is not yet implemented. Please use Application Password authentication for now.");
+  const startOAuthFlow = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(`/api/v1/integrations/wordpress/oauth/start?brand_id=${brandId}`, {
+        headers: { Authorization: `Bearer ${await getValidAccessToken()}` },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "WordPress.com OAuth is not configured");
+      }
+      const { authorize_url } = await response.json();
+      window.location.href = authorize_url; // hand off to WordPress.com
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start WordPress.com connection");
+      setLoading(false);
+    }
   };
 
   if (loading && !config.site_url) {
@@ -316,6 +341,29 @@ export default function WordPressSetupPage() {
             ))}
           </div>
         </div>
+
+        {oauthNotice && (
+          <div className={`rounded-lg p-4 mb-6 border ${oauthNotice.type === "ok" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+            <p className={oauthNotice.type === "ok" ? "text-green-700" : "text-red-700"}>{oauthNotice.text}</p>
+          </div>
+        )}
+
+        {/* WordPress.com one-click connect — fastest path for WP.com-hosted sites */}
+        {!editMode && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 mb-6 flex items-center justify-between gap-4">
+            <div>
+              <div className="font-medium text-gray-900">Hosted on WordPress.com?</div>
+              <div className="text-sm text-gray-500">Connect instantly with OAuth — no application password needed.</div>
+            </div>
+            <button
+              onClick={startOAuthFlow}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              Connect with WordPress.com
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -401,9 +449,9 @@ export default function WordPressSetupPage() {
                       className="mt-1"
                     />
                     <div>
-                      <div className="font-medium">OAuth (Coming Soon)</div>
+                      <div className="font-medium">OAuth (WordPress.com)</div>
                       <div className="text-sm text-gray-500">
-                        OAuth authentication for WordPress.com hosted sites
+                        For WordPress.com-hosted sites — use the “Connect with WordPress.com” button above.
                       </div>
                     </div>
                   </label>

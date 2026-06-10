@@ -25,6 +25,7 @@ const MONTHS = [
 
 const CHIP: Record<string, { bg: string; text: string; dot: string }> = {
   SCHEDULED:  { bg: "#e3f2fd", text: "#1565c0", dot: "#1e88e5" },
+  PENDING_APPROVAL: { bg: "#fff8e1", text: "#a76f00", dot: "#f5a623" },
   PUBLISHING: { bg: "#fff3e0", text: "#e65100", dot: "#fb8c00" },
   PUBLISHED:  { bg: "#e8f5e9", text: "#2e7d32", dot: "#43a047" },
   FAILED:     { bg: "#ffebee", text: "#b71c1c", dot: "#e53935" },
@@ -168,6 +169,27 @@ export default function CalendarPage() {
     }
   }
 
+  async function reviewAction(scheduleId: string, action: "approve" | "reject") {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await authedFetch(`/v1/schedules/${scheduleId}/${action}`, {
+        method: "POST",
+        body: action === "reject" ? JSON.stringify({ reason: "Rejected from calendar" }) : undefined,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : `API error ${res.status}`);
+      }
+      setDetail(null);
+      await load();
+    } catch (e) {
+      setError(`Could not ${action} — ` + (e instanceof Error ? e.message : "unknown error"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#f8f9fa", fontFamily: "Google Sans, Roboto, sans-serif" }}>
       {/* Toolbar */}
@@ -185,6 +207,7 @@ export default function CalendarPage() {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 400, color: "#3c4043" }}>{MONTHS[month]} {year}</h2>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: "#5f6368" }}>Click days to schedule →</span>
+        <Link href={`/brands/${brandId}/review`} style={{ padding: "8px 18px", background: "#fff", color: "#a76f00", border: "1px solid #f5a623", borderRadius: 24, fontSize: 14, fontWeight: 500, textDecoration: "none" }}>Review queue</Link>
         <Link href={`/brands/${brandId}/blogs/new`} style={{ padding: "8px 18px", background: "#fff", color: "#1a73e8", border: "1px solid #dadce0", borderRadius: 24, fontSize: 14, fontWeight: 500, textDecoration: "none" }}>+ One-off Article</Link>
       </div>
 
@@ -279,7 +302,9 @@ export default function CalendarPage() {
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, boxShadow: "0 8px 40px rgba(0,0,0,0.2)", padding: 24, width: 520, maxWidth: "92vw", maxHeight: "85vh", overflowY: "auto" }}>
             <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 600, color: "#202124" }}>Schedule content</h3>
             <p style={{ margin: "0 0 16px", fontSize: 13, color: "#5f6368" }}>
-              Each article is generated now and auto-published to WordPress at the time below on its day.
+              Each article is generated now. Once ready it goes to the{" "}
+              <strong>review queue</strong> for approval — nothing is published until you approve it.
+              The time below is the target publish slot.
             </p>
 
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -337,6 +362,12 @@ export default function CalendarPage() {
               {detail.published_urls?.wordpress && <div style={{ display: "flex", gap: 10 }}><span>🔗</span><a href={detail.published_urls.wordpress} target="_blank" rel="noreferrer" style={{ color: "#1a73e8" }}>View published post</a></div>}
             </div>
             <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              {detail.status === "PENDING_APPROVAL" && (
+                <>
+                  <button onClick={() => reviewAction(detail.id, "reject")} disabled={submitting} style={{ padding: "8px 18px", border: "1px solid #e53935", borderRadius: 4, background: "#fff", fontSize: 13, fontWeight: 500, cursor: submitting ? "default" : "pointer", color: "#b71c1c" }}>Reject</button>
+                  <button onClick={() => reviewAction(detail.id, "approve")} disabled={submitting} style={{ padding: "8px 18px", border: "none", borderRadius: 4, background: submitting ? "#a5d6a7" : "#2e7d32", color: "#fff", fontSize: 13, fontWeight: 500, cursor: submitting ? "default" : "pointer" }}>Approve & Publish</button>
+                </>
+              )}
               {detail.blog_job_id && (
                 <Link href={`/brands/${brandId}/blogs/${detail.blog_job_id}`} onClick={() => setDetail(null)} style={{ padding: "8px 18px", background: "#1a73e8", color: "#fff", borderRadius: 4, fontSize: 13, fontWeight: 500, textDecoration: "none" }}>Open Article →</Link>
               )}
