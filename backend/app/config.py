@@ -13,6 +13,7 @@ _ROOT_ENV = _THIS_DIR.parent.parent / ".env"  # 100xai/.env (fallback)
 class Settings(BaseSettings):
     app_env: str = "development"
     app_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:3000"
     log_level: str = "INFO"
     database_url: str = "postgresql+psycopg://100xai:100xai@localhost:5432/100xai"
     redis_url: str = "redis://localhost:6379/0"
@@ -52,6 +53,32 @@ class Settings(BaseSettings):
     blog_model: str = "anthropic/claude-haiku-4-5-20251001"
     blog_section_max_tokens: int = 2000
     blog_brief_max_tokens: int = 3000
+
+    # --- Email / verification ---
+    email_backend: str = "console"  # "console" (logs link) | "smtp"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "no-reply@100xai.example"
+    smtp_use_tls: bool = True
+    email_verification_expiry_hours: int = 24
+
+    # --- Terms & Conditions ---
+    current_terms_version: str = "2026-06-09"
+
+    # --- WordPress.com OAuth (alternative to self-hosted Application Passwords) ---
+    wpcom_client_id: str | None = None
+    wpcom_client_secret: str | None = None
+    # Must exactly match the redirect URI registered in the WordPress.com app.
+    wpcom_redirect_uri: str = "http://localhost:8000/v1/integrations/wordpress/oauth/callback"
+
+    # --- Razorpay billing ---
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
+    razorpay_plan_starter: str | None = None  # Razorpay plan_id for the "starter" tier
+    razorpay_plan_pro: str | None = None       # Razorpay plan_id for the "pro" tier
 
     model_config = SettingsConfigDict(
         env_file=[str(_ROOT_ENV), str(_BACKEND_ENV)],  # root first, backend overrides

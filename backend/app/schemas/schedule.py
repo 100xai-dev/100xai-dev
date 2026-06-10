@@ -10,6 +10,7 @@ class ScheduleStatus(str, Enum):
     """Status of a scheduled post."""
     DRAFT = "DRAFT"
     SCHEDULED = "SCHEDULED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
     PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
@@ -62,6 +63,11 @@ class BulkScheduleRequest(BaseModel):
     time: str = Field("09:00", description="Publish time-of-day for all items, HH:MM (24h)")
     timezone_str: str = Field("UTC", alias="timezone")
     channels: List[str] = Field(default_factory=lambda: ["wordpress"])
+
+
+class RejectScheduleRequest(BaseModel):
+    """Reject a schedule that is awaiting review."""
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 # --- Response Schemas for Publishing Monitoring ---

@@ -11,6 +11,8 @@ from app.repositories.brands import get_brand
 from app.schemas.content_generation import ContentGenerationRequest, ContentGenerationResponse
 from app.services.job_dispatcher import JobDispatcher
 from app.services.content_generation import JOB_STAGE_CONTENT
+from app.services.billing import enforce_plan_limit
+from app.services.billing_plans import RESOURCE_BLOGS
 
 router = APIRouter(tags=["content-generation"])
 
@@ -28,6 +30,7 @@ def trigger_content_generation(
 ) -> ContentGenerationResponse:
     """Trigger Pipeline 3 content generation"""
     require_role(current_user.role, {"admin", "team_member"})
+    enforce_plan_limit(db, current_user.org_id, RESOURCE_BLOGS)
 
     # Verify brand exists and is ready
     brand = get_brand(db, brand_id, current_user.org_id)

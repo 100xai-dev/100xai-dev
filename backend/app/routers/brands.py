@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth.rbac import require_role
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user
-from app.models import Brand, BrandProfile, Job, Keyword
+from app.models import Brand, BrandKnowledgeSource, BrandProfile, IntegrationAccount, Job, Keyword
 from app.repositories.brands import get_brand
 from app.schemas.brand import (
     ApproveBrandResponse,
@@ -17,6 +17,8 @@ from app.schemas.brand import (
 from app.schemas.brand_profile import BrandProfileContent, BrandProfileFull, BrandProfilePatch
 from app.schemas.keyword import KeywordListResponse, KeywordOut, KeywordResearchRequest, KeywordResearchResponse, KeywordStatsResponse
 from app.services.brand_service import approve_brand, create_brand, delete_brand_immediately, patch_profile, submit_manual_profile
+from app.services.billing import enforce_plan_limit
+from app.services.billing_plans import RESOURCE_BRANDS
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -28,6 +30,7 @@ def create_brand_endpoint(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> BrandCreateResponse:
     require_role(current_user.role, {"admin", "team_member"})
+    enforce_plan_limit(db, current_user.org_id, RESOURCE_BRANDS)
     brand, job = create_brand(db, payload, current_user)
     return BrandCreateResponse(
         brand_id=brand.id,
@@ -59,15 +62,61 @@ def get_brand_endpoint(
     return _brand_summary(db, brand.id, current_user.org_id)
 
 
-@router.delete("/{brand_id}", status_code=status.HTTP_200_OK)
-def delete_brand_endpoint(
+@router.get("/{brand_id}/onboarding-status", response_model=dict)
+def get_onboarding_status(
     brand_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    """Aggregate setup progress so the onboarding wizard can render in one call."""
+    require_role(current_user.role, {"admin", "team_member", "viewer"})
+    brand = get_brand(db, brand_id, current_user.org_id)
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resource not found")
+
+    profile = db.query(BrandProfile).filter(BrandProfile.brand_id == brand_id).first()
+    sources_count = db.query(BrandKnowledgeSource).filter(BrandKnowledgeSource.brand_id == brand_id).count()
+    keywords_count = db.query(Keyword).filter(Keyword.brand_id == brand_id).count()
+    active_integration = (
+        db.query(IntegrationAccount)
+        .filter(IntegrationAccount.brand_id == brand_id, IntegrationAccount.status == "active")
+        .first()
+    )
+
+    steps = {
+        "profile_ready": profile is not None,
+        "profile_approved": bool(profile and profile.locked),
+        "sources_count": sources_count,
+        "has_sources": sources_count > 0,
+        "has_active_integration": active_integration is not None,
+        "integration_provider": active_integration.provider if active_integration else None,
+        "keywords_count": keywords_count,
+        "has_keywords": keywords_count > 0,
+    }
+    completed = sum([
+        steps["profile_ready"],
+        steps["has_active_integration"],
+        steps["has_keywords"],
+        brand.status == "READY",
+    ])
+    return {
+        "brand_id": brand_id,
+        "brand_status": brand.status,
+        "dna_source": brand.dna_source,
+        "steps": steps,
+        "is_complete": brand.status == "READY" and steps["has_active_integration"],
+        "completion": round(completed / 4 * 100),
+    }
+
+
+@router.delete("/{brand_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_brand_endpoint(
+    brand_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
     require_role(current_user.role, {"admin"})
     delete_brand_immediately(db, brand_id, current_user)
-    return {"deleted": True, "brand_id": brand_id}
 
 
 @router.post("/{brand_id}/profile", response_model=BrandProfileFull, status_code=status.HTTP_201_CREATED)

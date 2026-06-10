@@ -69,44 +69,52 @@ def create_blog_job(
     if not keyword:
         raise HTTPException(status_code=422, detail="keyword cannot be empty")
 
-    # Create Pipeline 3 (Content Generation) job instead of old blog job
+    # Run the full pipeline (P1 keyword research → P2 SERP analysis → P3 content
+    # generation). The AI selection layer in P1 picks the best target keyword —
+    # relevant to the user's seed and high-traffic — instead of writing blindly for
+    # the typed keyword. The chain auto-advances P1→P2→P3 via the job dispatcher.
     job_id = uuid_str()
-    
-    # Create the BlogJob for UI compatibility
+
+    # Create the BlogJob for UI compatibility. The eventually-generated draft links
+    # back here via blog_job_id (propagated through the pipeline payloads).
     blog_job = BlogJob(
         id=job_id,
         org_id=current_user.org_id,
         brand_id=brand_id,
         created_by=current_user.id,
         keyword=keyword,
-        status="GENERATING",  # Skip brief process, go straight to generation
+        status="GENERATING",
     )
     db.add(blog_job)
-    
-    # Create the Pipeline 3 job
+
+    # Pipeline 1 (keyword research) job. P1→P2 reuse this same job row; P2→P3 spawns a
+    # separate content_generation job carrying blog_job_id so its draft links to this
+    # BlogJob (see content_generation.run_content_generation_pipeline).
     pipeline_job = Job(
-        id=job_id,  # Use same ID for consistency
+        id=job_id,  # Share the BlogJob id so blog_job_id linkage is implicit.
         org_id=current_user.org_id,
         brand_id=brand_id,
-        job_type="content_generation",
+        job_type="keyword_research",
         status="QUEUED",
-        stage="CONTENT",
+        stage="KEYWORD",
         input_payload={
             "keyword": keyword,
             "created_by": current_user.id,
-            "blog_integration": True  # Flag to indicate this came from blog UI
-        }
+            "blog_job_id": job_id,     # Link the final draft back to this BlogJob.
+            "blog_integration": True,  # Flag: originated from the blog UI.
+        },
     )
     db.add(pipeline_job)
     db.commit()
 
-    # Use Pipeline 3 instead of old blog pipeline
-    JobDispatcher().enqueue_content_generation(
+    JobDispatcher().enqueue_keyword_research(
         job_id=job_id,
         brand_id=brand_id,
-        keyword=keyword
+        primary_keyword=keyword,
+        brand_context=profile.one_liner or "",
+        business_description=profile.industry or "",
     )
-    
+
     return BlogJobOut.model_validate(blog_job)
 
 
@@ -141,36 +149,37 @@ def get_blog_job(
     require_role(current_user.role, {"admin", "team_member", "viewer"})
     blog_job = _get_blog_job(db, job_id, current_user.org_id)
     
-    # Sync status from Pipeline 3 job if it exists
-    pipeline_job = db.query(Job).filter(
-        Job.id == job_id,
-        Job.job_type == "content_generation"
-    ).first()
-    
-    if pipeline_job:
-        # Map Pipeline 3 stages to blog statuses for UI compatibility
-        status_mapping = {
-            ("QUEUED", "CONTENT"): "GENERATING",
-            ("PROCESSING", "CONTENT"): "GENERATING",
-            ("PROCESSING", "DRAFT"): "WRITING",
-            ("PROCESSING", "IMAGE"): "WRITING",
-            ("SUCCEEDED", "COMPLETE"): "PENDING_REVIEW",
-        }
+    # Sync status from the pipeline. The job sharing this BlogJob's id runs P1→P2;
+    # P2→P3 spawns a separate content_generation job (recorded on the P1/P2 job's
+    # output_payload as ``auto_triggered_content_job``) whose draft links back here.
+    pipeline_job = db.query(Job).filter(Job.id == job_id).first()
 
-        # FAILED is terminal at any stage — map it explicitly so the UI doesn't
-        # poll forever on "GENERATING" when the pipeline died mid-stage.
-        if pipeline_job.status == "FAILED":
+    if pipeline_job:
+        content_job_id = (pipeline_job.output_payload or {}).get("auto_triggered_content_job")
+        content_job = (
+            db.query(Job).filter(Job.id == content_job_id).first() if content_job_id else None
+        )
+        # The generated draft (keyed to this BlogJob's id) is the completion signal —
+        # the P1/P2 job reaches SUCCEEDED well before P3 finishes writing.
+        draft = db.query(BlogDraft).filter(BlogDraft.job_id == job_id).first()
+
+        if draft and draft.html_content:
+            new_status = "PENDING_REVIEW"
+        elif pipeline_job.status == "FAILED" or (content_job and content_job.status == "FAILED"):
+            # FAILED is terminal — map it explicitly so the UI stops polling.
             new_status = "FAILED"
+        elif content_job and content_job.stage in ("DRAFT", "IMAGE"):
+            new_status = "WRITING"
         else:
-            pipeline_status_key = (pipeline_job.status, pipeline_job.stage)
-            new_status = status_mapping.get(pipeline_status_key, blog_job.status)
-        
+            new_status = "GENERATING"
+
         if new_status != blog_job.status:
             blog_job.status = new_status
-            if pipeline_job.error_message:
-                blog_job.error_message = pipeline_job.error_message
+            err = (content_job and content_job.error_message) or pipeline_job.error_message
+            if err:
+                blog_job.error_message = err
             db.commit()
-    
+
     return BlogJobOut.model_validate(blog_job)
 
 
@@ -248,32 +257,41 @@ def retry_blog(
     if job.status not in {"REJECTED", "FAILED"}:
         raise HTTPException(status_code=400, detail="only REJECTED or FAILED jobs can be retried")
 
-    # Check if this is a Pipeline 3 job
+    # The job sharing this BlogJob's id is the pipeline entrypoint (keyword_research
+    # for new jobs; content_generation for legacy ones). Retry restarts the chain
+    # from that entrypoint.
     pipeline_job = db.query(Job).filter(
         Job.id == job_id,
-        Job.job_type == "content_generation"
+        Job.job_type.in_(["keyword_research", "content_generation"]),
     ).first()
-    
+
     if pipeline_job:
-        # Reset Pipeline 3 job
+        keyword = (pipeline_job.input_payload or {}).get("keyword", "content")
+        # Reset the pipeline job to its starting stage.
         pipeline_job.status = "QUEUED"
-        pipeline_job.stage = "CONTENT"
+        pipeline_job.stage = "KEYWORD" if pipeline_job.job_type == "keyword_research" else "CONTENT"
         pipeline_job.error_message = None
         pipeline_job.error_details = None
         pipeline_job.started_at = None
         pipeline_job.finished_at = None
-        
+        pipeline_job.output_payload = None  # Clear stale auto_triggered_content_job linkage.
+
         job.status = "GENERATING"
         job.error_message = None
         db.commit()
-        
-        # Re-enqueue Pipeline 3 job
-        keyword = pipeline_job.input_payload.get("keyword", "content")
-        JobDispatcher().enqueue_content_generation(
-            job_id=job_id,
-            brand_id=brand_id,
-            keyword=keyword
-        )
+
+        if pipeline_job.job_type == "keyword_research":
+            JobDispatcher().enqueue_keyword_research(
+                job_id=job_id,
+                brand_id=brand_id,
+                primary_keyword=keyword,
+            )
+        else:
+            JobDispatcher().enqueue_content_generation(
+                job_id=job_id,
+                brand_id=brand_id,
+                keyword=keyword,
+            )
     else:
         # Legacy blog pipeline
         job.status = "NEW"

@@ -8,11 +8,22 @@ from app.routers.brands import router as brands_router
 from app.routers.jobs import router as jobs_router
 from app.routers.brand_sources import router as brand_sources_router
 from app.routers.integrations import router as integrations_router
+from app.routers.wpcom_oauth import router as wpcom_oauth_router
 from app.routers.content_generation import router as content_generation_router
 from app.routers.schedules import router as schedules_router
 from app.routers.publishing import router as publishing_router
+from app.routers.billing import router as billing_router
+from app.config import get_settings as _get_settings
 
-app = FastAPI(title="100xAI", version="0.2.0", docs_url="/docs")
+_settings = _get_settings()
+_is_dev = _settings.app_env == "development"
+
+app = FastAPI(
+    title="100xAI",
+    version="0.2.0",
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+)
 
 # Custom CORS middleware to handle ngrok domains
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,6 +37,7 @@ class NgrokCORSMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             if origin and (
                 origin.startswith("http://localhost:") or
+                origin == _settings.frontend_url or
                 (origin.startswith("https://") and (".ngrok.io" in origin or ".ngrok.app" in origin or ".ngrok-free.app" in origin))
             ):
                 return Response(
@@ -42,9 +54,10 @@ class NgrokCORSMiddleware(BaseHTTPMiddleware):
         
         response = await call_next(request)
         
-        # Allow local development and ngrok domains
+        # Allow local development, ngrok, and configured production frontend
         if origin and (
             origin.startswith("http://localhost:") or
+            origin == _settings.frontend_url or
             (origin.startswith("https://") and (".ngrok.io" in origin or ".ngrok.app" in origin or ".ngrok-free.app" in origin))
         ):
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -73,6 +86,8 @@ app.include_router(brands_router, prefix="/v1")
 app.include_router(jobs_router, prefix="/v1")
 app.include_router(brand_sources_router, prefix="/v1")
 app.include_router(integrations_router, prefix="/v1")
+app.include_router(wpcom_oauth_router, prefix="/v1")
 app.include_router(content_generation_router, prefix="/v1")
 app.include_router(schedules_router)
 app.include_router(publishing_router, prefix="/v1")
+app.include_router(billing_router, prefix="/v1")

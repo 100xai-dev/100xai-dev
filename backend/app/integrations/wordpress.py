@@ -23,15 +23,56 @@ class WordPressProvider(IntegrationProvider):
 
     provider_name = "wordpress"
 
+    WPCOM_API = "https://public-api.wordpress.com/rest/v1.1"
+
+    @staticmethod
+    def _is_oauth(config: dict, credentials: dict) -> bool:
+        """True when this account is connected via WordPress.com OAuth rather than
+        self-hosted Application Passwords."""
+        return (config or {}).get("auth_type") == "oauth" or bool((credentials or {}).get("access_token"))
+
     async def validate_config(self, config: dict) -> ValidationResult:
         errors = []
-        if not config.get("site_url"):
+        if config.get("auth_type") == "oauth":
+            if not config.get("blog_id"):
+                errors.append("blog_id is required for WordPress.com OAuth")
+        elif not config.get("site_url"):
             errors.append("site_url is required")
         if config.get("default_status") not in (None, "draft", "publish"):
             errors.append("default_status must be 'draft' or 'publish'")
         return ValidationResult(ok=len(errors) == 0, errors=errors)
 
     async def test_connection(self, config: dict, credentials: dict) -> TestResult:
+        if self._is_oauth(config, credentials):
+            return await self._test_connection_oauth(config, credentials)
+        return await self._test_connection_app_password(config, credentials)
+
+    async def _test_connection_oauth(self, config: dict, credentials: dict) -> TestResult:
+        token = credentials.get("access_token", "")
+        blog_id = config.get("blog_id")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with httpx.AsyncClient(timeout=15, headers=headers, follow_redirects=True) as client:
+            try:
+                me = await client.get(f"{self.WPCOM_API}/me")
+                if me.status_code == 401:
+                    return TestResult(ok=False, error="WordPress.com token rejected — reconnect required")
+                if me.status_code != 200:
+                    return TestResult(ok=False, error=f"WordPress.com auth check failed (HTTP {me.status_code})")
+                site = await client.get(f"{self.WPCOM_API}/sites/{blog_id}")
+                site_info = site.json() if site.status_code == 200 else {}
+            except httpx.RequestError as e:
+                return TestResult(ok=False, error=f"Network error: {e}")
+        return TestResult(
+            ok=True,
+            site_info={
+                "name": site_info.get("name", ""),
+                "description": site_info.get("description", ""),
+                "url": site_info.get("URL", config.get("site_url", "")),
+                "user_display_name": me.json().get("display_name", ""),
+            },
+        )
+
+    async def _test_connection_app_password(self, config: dict, credentials: dict) -> TestResult:
         site_url = config["site_url"].rstrip("/")
         username = credentials.get("username", "")
         app_password = credentials.get("application_password", "")
@@ -141,6 +182,43 @@ class WordPressProvider(IntegrationProvider):
             return resp.json()
 
     async def publish(self, config: dict, credentials: dict, payload: PublishPayload) -> PublishResult:
+        if self._is_oauth(config, credentials):
+            return await self._publish_oauth(config, credentials, payload)
+        return await self._publish_app_password(config, credentials, payload)
+
+    async def _publish_oauth(self, config: dict, credentials: dict, payload: PublishPayload) -> PublishResult:
+        """Publish via the WordPress.com REST v1.1 API using a Bearer token."""
+        blog_id = config["blog_id"]
+        headers = {"Authorization": f"Bearer {credentials['access_token']}"}
+        post_data: dict = {
+            "title": payload.title,
+            "slug": payload.slug,
+            "content": payload.merged_html,
+            "excerpt": payload.meta_description,
+            "status": config.get("default_status", "draft"),
+        }
+        if payload.tags:
+            post_data["tags"] = ",".join(payload.tags)
+        if config.get("default_categories"):
+            post_data["categories"] = ",".join(str(c) for c in config["default_categories"])
+        if payload.featured_image_url:
+            # WP.com sideloads remote images passed via media_urls and attaches the
+            # first as the featured image.
+            post_data["media_urls"] = [payload.featured_image_url]
+
+        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+            resp = await client.post(f"{self.WPCOM_API}/sites/{blog_id}/posts/new", json=post_data)
+            resp.raise_for_status()
+            post = resp.json()
+
+        return PublishResult(
+            external_id=str(post.get("ID")),
+            public_url=post.get("URL", ""),
+            published_at=post.get("date"),
+            raw_response=post,
+        )
+
+    async def _publish_app_password(self, config: dict, credentials: dict, payload: PublishPayload) -> PublishResult:
         site_url = config["site_url"].rstrip("/")
         auth = (credentials["username"], credentials["application_password"])
 
