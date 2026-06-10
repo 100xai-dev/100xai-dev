@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -14,8 +15,24 @@ from app.models.serp_analysis import SerpAnalysis, CompetitorAnalysis
 from app.services.llm import LLMService
 from app.services.leonardo import LeonardoService
 from app.services.placid import PlacidService
+from app.services.blog_pipeline import _calc_seo_score, _calc_virality_score
 
 logger = logging.getLogger(__name__)
+
+
+def _calc_aeo_score_from_html(html: str) -> int:
+    """Estimate AEO score from generated HTML without needing a BlogBrief."""
+    score = 0
+    if "FAQPage" in html:
+        score += 35
+    if 'class="direct-answer"' in html or "<strong>" in html[:500]:
+        score += 35
+    h_count = html.lower().count("<h2") + html.lower().count("<h3")
+    if h_count >= 6:
+        score += 30
+    elif h_count >= 3:
+        score += 15
+    return min(score, 100)
 
 # Job stage constants for Pipeline 3
 JOB_STAGE_CONTENT = "CONTENT"
@@ -304,14 +321,16 @@ Generate a content brief with:
 
 IMPORTANT: Generate exactly 8-10 main sections for the table of contents.
 
-Return as JSON with keys: goal, type, audience, intent, word_count, angle, ctas, sections"""
-    
+Return ONLY a valid JSON object (no markdown, no prose) with keys: goal, type, audience, intent, word_count, angle, ctas, sections"""
+
     llm = LLMService()
     raw = await llm.call(
         model=get_settings().extraction_model,
         prompt=prompt,
         response_format="json",
-        max_tokens=2000,
+        # A full 8-10 section brief for a 1500-3000 word article is large
+        # structured JSON; 2000 truncated it mid-object. 4000 fits with margin.
+        max_tokens=4000,
         temperature=0.4
     )
     
@@ -352,14 +371,16 @@ Generate:
 4. H1 heading
 5. Detailed outline with sections (each with heading, heading_type, phases for content, estimated_words)
 
-Return as JSON with keys: slug, meta_title, meta_description, h1, sections"""
-    
+Return ONLY a valid JSON object (no markdown, no prose) with keys: slug, meta_title, meta_description, h1, sections"""
+
     llm = LLMService()
     raw = await llm.call(
         model="anthropic/claude-haiku-4-5-20251001",  # Faster model for structured output
         prompt=prompt,
         response_format="json",
-        max_tokens=1500,
+        # A detailed outline (8-10 sections, each with phases + word targets) for
+        # a 1500-3000 word article overruns 1500 tokens; 4000 fits with margin.
+        max_tokens=4000,
         temperature=0.3
     )
     
@@ -372,26 +393,68 @@ Return as JSON with keys: slug, meta_title, meta_description, h1, sections"""
         sections=data.get("sections", [])
     )
 
-def parse_and_validate_outline(outline_data: dict) -> ValidatedOutline:
-    """Parse + validate outline - Safe JSON parse; assert sections non-empty"""
-    
-    if not outline_data.get("sections") or len(outline_data["sections"]) == 0:
-        raise ValueError("Outline must contain at least one section")
-    
-    validated_sections = []
-    for i, section in enumerate(outline_data["sections"]):
-        if not section.get("heading"):
-            raise ValueError(f"Section {i} missing heading")
-        
-        validated_sections.append(ValidatedSection(
-            index=i,
-            heading=section["heading"],
-            heading_type=section.get("heading_type", "h2"),
-            phases=section.get("phases", ["Introduce topic", "Provide details", "Conclude"]),
-            estimated_words=section.get("estimated_words", 300)
-        ))
-    
-    return ValidatedOutline(sections=validated_sections)
+_DEFAULT_OUTLINE_HEADINGS = [
+    "Introduction",
+    "Key Considerations",
+    "Practical Tips",
+    "Common Mistakes to Avoid",
+    "Conclusion",
+]
+
+
+def _outline_section(heading: str, *, heading_type: str = "h2",
+                     phases: list | None = None, estimated_words: int = 300) -> "ValidatedSection":
+    return ValidatedSection(
+        index=0,  # re-indexed by the caller below
+        heading=heading,
+        heading_type=heading_type,
+        phases=phases or ["Introduce topic", "Provide details", "Conclude"],
+        estimated_words=estimated_words,
+    )
+
+
+def parse_and_validate_outline(
+    outline_data: dict,
+    fallback_headings: list[str] | None = None,
+) -> ValidatedOutline:
+    """Parse + validate the outline, degrading gracefully instead of crashing.
+
+    The LLM occasionally returns an empty/unparseable outline (e.g. a truncated
+    response). Rather than failing the whole article, this skips malformed
+    sections and, if none survive, builds a minimal outline from
+    ``fallback_headings`` (derived from the brief / SERP by the caller) and
+    finally a generic default. Only the wording degrades — the pipeline proceeds.
+    """
+    sections: list[ValidatedSection] = []
+    for section in (outline_data.get("sections") or []):
+        if isinstance(section, dict):
+            heading = (section.get("heading") or "").strip()
+            if not heading:
+                continue
+            sections.append(_outline_section(
+                heading,
+                heading_type=section.get("heading_type", "h2"),
+                phases=section.get("phases", ["Introduce topic", "Provide details", "Conclude"]),
+                estimated_words=section.get("estimated_words", 300),
+            ))
+        elif isinstance(section, str) and section.strip():
+            # Tolerate a bare-string heading.
+            sections.append(_outline_section(section.strip()))
+
+    if not sections:
+        headings = [h.strip() for h in (fallback_headings or []) if isinstance(h, str) and h.strip()]
+        if not headings:
+            headings = list(_DEFAULT_OUTLINE_HEADINGS)
+        logger.warning(
+            "Outline had no usable sections; falling back to %d derived headings", len(headings)
+        )
+        sections = [_outline_section(h) for h in headings]
+
+    # Re-index sequentially so downstream batching/positioning is consistent.
+    for i, section in enumerate(sections):
+        section.index = i
+
+    return ValidatedOutline(sections=sections)
 
 async def generate_introduction(
     content_brief: ContentBrief,
@@ -404,6 +467,10 @@ async def generate_introduction(
     sub_keywords = sub_keywords or []
     sub_keywords_str = f"- Sub-keywords to include naturally (1-2 times each): {', '.join(sub_keywords[:3])}" if sub_keywords else ""
     
+    banned_block = f"NEVER use these phrases: {', '.join(brand_profile.banned_phrases)}\n" if brand_profile.banned_phrases else ""
+    site_url = brand_profile.site_url or ""
+    brand_link = f'<a href="{site_url}">{brand_profile.name}</a>' if site_url else brand_profile.name
+
     prompt = f"""Write an engaging introduction for a blog article.
 
 CONTENT BRIEF:
@@ -414,21 +481,21 @@ CONTENT BRIEF:
 BRAND VOICE:
 - Tone: {brand_profile.tone_rules}
 - Unique Angle: {brand_profile.unique_angle}
-
+{banned_block}
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword}
 - Include main keyword 2-3 times naturally (targeting 2% density in full article)
 {sub_keywords_str}
 
 Write a 300-500 word introduction that:
-1. Hooks the reader immediately
-2. Introduces the topic naturally with the keyword appearing 2-3 times
-3. Sets expectations for what they'll learn
-4. Matches the brand voice and tone
-5. Creates curiosity to read more
+1. Hooks the reader immediately with a concrete scenario, stat, or pain point the audience faces
+2. Introduces the topic naturally with the keyword appearing in the first 100 words
+3. Mentions {brand_profile.name} once naturally, linked: {brand_link}
+4. Sets expectations for what they'll learn
+5. Matches the brand voice and tone
 6. Naturally integrates sub-keywords without forcing them
 
-Return clean HTML (paragraphs only, no heading tags)."""
+Return clean HTML using only <p>, <strong>, <em>, <a> tags. No heading tags."""
     
     llm = LLMService()
     return await llm.call(
@@ -458,7 +525,9 @@ async def generate_body_sections(
         # Distribute sub-keywords across sections
         section_sub_keywords = sub_keywords[section.index:section.index+3] if sub_keywords else []
         sub_keywords_str = f"- Sub-keywords to include naturally: {', '.join(section_sub_keywords)}" if section_sub_keywords else ""
-        
+        banned_block = f"NEVER use these phrases: {', '.join(brand_profile.banned_phrases)}\n" if brand_profile.banned_phrases else ""
+        site_url = brand_profile.site_url or ""
+
         prompt = f"""Write a comprehensive section for a blog article.
 
 SECTION DETAILS:
@@ -473,9 +542,10 @@ CONTENT BRIEF:
 - Target Audience: {content_brief.target_audience}
 
 BRAND VOICE:
+- Brand: {brand_profile.name} ({brand_profile.one_liner})
 - Tone: {brand_profile.tone_rules}
 - Unique Angle: {brand_profile.unique_angle}
-{knowledge_block}
+{banned_block}{knowledge_block}
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword if keyword else 'N/A'}
 - Include main keyword 2-4 times naturally (targeting 2% density overall)
@@ -483,15 +553,14 @@ KEYWORD OPTIMIZATION:
 - Aim for 0.5-1% density for sub-keywords
 
 Write engaging, informative content that:
-1. Thoroughly covers all phases mentioned
-2. Uses practical examples and actionable advice
+1. Thoroughly covers all phases mentioned with concrete examples and numbers
+2. Uses practical, actionable advice
 3. Maintains the brand voice and tone
-4. Is scannable with subheadings if needed
-5. Flows naturally from the previous context
-6. Integrates keywords naturally without keyword stuffing
-7. Maintains 2% density for main keyword, 0.5-1% for sub-keywords
+4. Is scannable with subheadings where helpful
+5. References {brand_profile.name} at most once if it fits naturally{'; link it to ' + site_url if site_url else ''}
+6. Integrates keywords naturally without stuffing
 
-Return clean HTML (no heading tag for the main section title - it will be added separately)."""
+Return clean HTML using <h2>,<h3>,<p>,<strong>,<ul>,<ol>,<a> tags. No meta-commentary."""
         
         llm = LLMService()
         html_content = await llm.call(
@@ -571,6 +640,9 @@ async def generate_conclusion(
     sub_keywords = sub_keywords or []
     sub_keywords_str = f"- Sub-keywords to include naturally: {', '.join(sub_keywords[:2])}" if sub_keywords else ""
     
+    site_url = brand_profile.site_url or ""
+    site_link_rule = f"- Include at least one link to {site_url}" if site_url else ""
+
     prompt = f"""Write a compelling conclusion for the blog article.
 
 KEY SECTIONS COVERED:
@@ -581,25 +653,24 @@ CONTENT BRIEF:
 - Target Audience: {content_brief.target_audience}
 
 BRAND CONTEXT:
-- CTAs: {', '.join(brand_profile.ctas)}
-- Unique Angle: {brand_profile.unique_angle}
 - Brand: {brand_profile.name}
+- Unique Angle: {brand_profile.unique_angle}
+- CTAs: {', '.join(brand_profile.ctas)}
+{site_link_rule}
 
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword if keyword else 'N/A'}
 - Include main keyword 1-2 times naturally
 {sub_keywords_str}
 
-Write a conclusion that:
-1. Summarizes key takeaways from the article
-2. Reinforces the main value proposition
-3. Includes a relevant call-to-action
-4. Encourages further engagement
-5. Maintains brand voice and tone
-6. Naturally includes the main keyword 1-2 times
-7. Integrates sub-keywords without forcing them
+Write a 300-450 word conclusion that:
+1. Gives 5-7 concrete, action-oriented key takeaways as a bulleted list
+2. Reinforces the main value proposition tying to {brand_profile.unique_angle}
+3. Includes a strong, specific CTA from: {', '.join(brand_profile.ctas)}
+4. Naturally includes the main keyword 1-2 times
+5. Integrates sub-keywords without forcing them
 
-Target 200-400 words. Return clean HTML."""
+Return clean HTML using only <p>,<strong>,<ul>,<li>,<a> tags."""
     
     llm = LLMService()
     return await llm.call(
@@ -1200,40 +1271,54 @@ async def save_content_draft(
     db: Session
 ) -> BlogDraft:
     """Save to blog_drafts table · Stage = Draft"""
-    
+
+    # When triggered through the full pipeline chain from the calendar,
+    # blog_job_id is the original BlogJob.id (same as the keyword_research job_id).
+    # Fall back to job.id for standalone content generation runs.
+    payload = job.input_payload or {}
+    blog_job_id = payload.get("blog_job_id", job.id)
+
     # Update or create blog job for UI integration
-    blog_job = db.query(BlogJob).filter(BlogJob.id == job.id).first()
+    blog_job = db.query(BlogJob).filter(BlogJob.id == blog_job_id).first()
     if not blog_job:
-        # Create new blog job from content generation job
         blog_job = BlogJob(
-            id=job.id,
+            id=blog_job_id,
             org_id=job.org_id,
             brand_id=job.brand_id,
-            created_by=job.input_payload.get("created_by", "system"),
-            keyword=job.input_payload.get("keyword", "Generated Content"),
-            status="WRITING"  # Will be updated to PENDING_REVIEW when complete
+            created_by=payload.get("created_by", "system"),
+            keyword=payload.get("keyword", "Generated Content"),
+            status="WRITING",
         )
         db.add(blog_job)
-    
-    # Create or update draft
-    existing_draft = db.query(BlogDraft).filter(BlogDraft.job_id == job.id).first()
+
+    # Compute real scores from the generated content
+    keyword = payload.get("keyword", "")
+    seo_score = _calc_seo_score(article.html_content, keyword, article.meta_description)
+    aeo_score = _calc_aeo_score_from_html(article.html_content)
+    virality_score = _calc_virality_score(article.word_count, seo_score, aeo_score)
+
+    # Create or update draft — linked to blog_job_id so BlogSchedule can find it
+    existing_draft = db.query(BlogDraft).filter(BlogDraft.job_id == blog_job_id).first()
     if existing_draft:
-        # Update existing draft
         existing_draft.title = article.meta_title
         existing_draft.meta_description = article.meta_description
         existing_draft.html_content = article.html_content
         existing_draft.word_count = article.word_count
+        existing_draft.seo_score = seo_score
+        existing_draft.aeo_score = aeo_score
+        existing_draft.virality_score = virality_score
         draft = existing_draft
     else:
-        # Create new draft
         draft = BlogDraft(
-            job_id=job.id,
+            job_id=blog_job_id,
             title=article.meta_title,
             meta_description=article.meta_description,
             html_content=article.html_content,
             word_count=article.word_count,
-            seo_score=85,  # Higher score for Pipeline 3 with SEO optimization
-            approved=False
+            seo_score=seo_score,
+            aeo_score=aeo_score,
+            virality_score=virality_score,
+            approved=False,
         )
         db.add(draft)
     
@@ -1246,20 +1331,37 @@ async def save_content_draft(
 
 # Utility functions
 def safe_json_parse(raw_json: str) -> dict:
-    """Safely parse JSON with fallbacks"""
-    try:
-        # Clean common LLM artifacts
-        cleaned = raw_json.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-        
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        logger.warning(f"Failed to parse JSON: {raw_json[:100]}...")
+    """Parse JSON from an LLM response, tolerating markdown fences and prose.
+
+    Tries, in order: a direct parse, a fenced ```json … ``` block, and the
+    largest ``{ … }`` span (which survives leading/trailing prose or a partial
+    fence). Logs the FULL raw payload on failure so a truncated response (hit
+    max_tokens) is distinguishable from prose-wrapping when diagnosing.
+    """
+    if not isinstance(raw_json, str):
         return {}
+
+    cleaned = raw_json.strip()
+    candidates = [cleaned]
+
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        candidates.append(fence.group(1).strip())
+
+    first, last = cleaned.find("{"), cleaned.rfind("}")
+    if first != -1 and last > first:
+        candidates.append(cleaned[first:last + 1])
+
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(result, dict):
+            return result
+
+    logger.warning("Failed to parse JSON from LLM response (%d chars): %s", len(raw_json), raw_json)
+    return {}
 
 def clean_markdown_fences(content: str) -> str:
     """Remove markdown code fences from content"""
@@ -1342,34 +1444,25 @@ async def generate_image_prompt(
 ) -> str:
     """AI · reads article + brand profile → image prompt"""
     
-    prompt = f"""Generate a detailed image prompt for a featured image.
+    prompt = f"""Create a featured blog image prompt for {brand_profile.name} ({brand_profile.one_liner}).
+Article Meta Title: {article.meta_title}
 
-ARTICLE DETAILS:
-- Title: {article.meta_title}
-- Content Preview: {article.html_content[:1000]}
+Return JSON with EXACTLY these keys:
+- Object: main foreground element (draw from: {brand_profile.image_subject_hints or 'professional clean imagery'})
+- Background: scene/environment that fits the topic
+- Subject: what the image communicates conceptually
+- Emphasisers: palette {brand_profile.image_palette or 'modern color scheme'}; clean typography
+- Camera: suggested shot type (wide / close-up / overhead / etc.)
+- Complete_Prompt: cohesive final prompt under 1400 chars; NO identifiable real people; avoid stock clichés
 
-BRAND PROFILE:
-- Brand: {brand_profile.name}
-- Industry: {brand_profile.industry or 'General'}
-- Image Subject Hints: {brand_profile.image_subject_hints or 'Professional, clean imagery'}
-- Image Palette: {brand_profile.image_palette or 'Modern color scheme'}
-- Visual Direction: {brand_profile.visual_direction or 'Professional and engaging'}
+Return JSON only."""
 
-Create a detailed prompt for Leonardo AI that:
-1. Captures the essence of the article
-2. Matches the brand's visual style
-3. Is professional and engaging
-4. Avoids real people (use abstract concepts, illustrations, objects)
-5. Is suitable for blog featured image use
-
-Return only the image prompt text, no additional commentary."""
-    
     llm = LLMService()
     return await llm.call(
-        model="anthropic/claude-haiku-4-5-20251001",  # Best model for creative prompts
+        model="anthropic/claude-haiku-4-5-20251001",
         prompt=prompt,
-        response_format="text",
-        max_tokens=300,
+        response_format="json",
+        max_tokens=400,
         temperature=0.7
     )
 
@@ -1391,13 +1484,18 @@ async def generate_featured_image(
     try:
         logger.info(f"Starting image generation for job {job.id}")
         
-        # Generate image prompt
-        image_prompt = await generate_image_prompt(article, brand_profile)
-        logger.info(f"Generated image prompt: {image_prompt[:100]}...")
-        
+        # Generate image prompt — returns JSON per spec AI #9
+        image_prompt_raw = await generate_image_prompt(article, brand_profile)
+        image_prompt_data = safe_json_parse(image_prompt_raw) if isinstance(image_prompt_raw, str) else image_prompt_raw
+        if isinstance(image_prompt_data, dict):
+            complete_prompt = image_prompt_data.get("Complete_Prompt") or image_prompt_data.get("complete_prompt", "")
+        else:
+            complete_prompt = str(image_prompt_raw)
+        logger.info(f"Generated image prompt (Complete_Prompt): {complete_prompt[:120]}...")
+
         # Generate with Leonardo
         leonardo = LeonardoService()
-        raw_image_url = await leonardo.generate_image(image_prompt)
+        raw_image_url = await leonardo.generate_image(complete_prompt)
         logger.info(f"Leonardo generated image: {raw_image_url}")
         
         # Composite with Placid if template configured
@@ -1488,8 +1586,17 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         meta_outline = await generate_meta_and_outline(content_brief, brand_profile, target_keyword)
         logger.info(f"Meta and outline generated: {meta_outline.meta_title}")
         
-        # 05. Parse & validate outline
-        validated_outline = parse_and_validate_outline(meta_outline.model_dump())
+        # 05. Parse & validate outline. Supply fallback headings (from the brief,
+        # then SERP gaps/keywords) so a truncated/empty LLM outline degrades to a
+        # usable structure instead of crashing the whole article.
+        fallback_headings: list[str] = []
+        for s in (content_brief.sections or []):
+            if isinstance(s, dict):
+                fallback_headings.append(s.get("heading") or s.get("title") or s.get("name") or "")
+            elif isinstance(s, str):
+                fallback_headings.append(s)
+        fallback_headings += list(serp_data.competitor_gaps or [])[:6]
+        validated_outline = parse_and_validate_outline(meta_outline.model_dump(), fallback_headings)
         logger.info(f"Outline validated: {len(validated_outline.sections)} sections")
         
         # 06. Prepare link strategy
@@ -1599,12 +1706,14 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         
         job.stage = JOB_STAGE_COMPLETE
         job.status = "SUCCEEDED"
-        
-        # Update blog job status for UI compatibility
-        blog_job = db.query(BlogJob).filter(BlogJob.id == job_id).first()
+
+        # Resolve the correct BlogJob: use blog_job_id from payload when available
+        # (set when triggered via full pipeline chain from the calendar).
+        resolved_blog_job_id = (job.input_payload or {}).get("blog_job_id", job_id)
+        blog_job = db.query(BlogJob).filter(BlogJob.id == resolved_blog_job_id).first()
         if blog_job:
-            blog_job.status = "PENDING_REVIEW"  # Ready for user review/approval
-            
+            blog_job.status = "PENDING_REVIEW"
+
         db.commit()
         
         logger.info(f"Content generation completed successfully for job {job_id}")
