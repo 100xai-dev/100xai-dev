@@ -16,12 +16,135 @@ from app.services.publishers.base import PublisherFactory, PublishingError
 logger = logging.getLogger(__name__)
 
 
-def publish_scheduled_blog(schedule_id: str) -> None:
-    """Auto-publish a scheduled blog's generated draft to WordPress at its due time.
+def _slugify(title: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:200]
 
-    Enqueued via RQ ``enqueue_at(scheduled_at)`` when the schedule is created, so
-    it fires on the scheduled day. The article was generated up-front, so the
-    draft should already exist by now.
+
+def _draft_payload(schedule: "BlogSchedule", draft) -> Dict[str, Any]:
+    """Build the channel-agnostic content dict consumed by PublisherFactory publishers."""
+    return {
+        "title": draft.title or schedule.title,
+        "content": draft.html_content or "",
+        "excerpt": draft.meta_description or "",
+        "slug": _slugify(draft.title or schedule.title),
+        "tags": schedule.tags or [],
+        "categories": schedule.categories or [],
+        "featured_image_url": draft.featured_image_url,
+        "meta_description": draft.meta_description or "",
+        "status": "publish",
+    }
+
+
+def _publish_channel(db, schedule, job, draft, channel: str) -> str:
+    """Publish ``draft`` to a single channel, returning the public URL.
+
+    WordPress reuses the proven legacy provider (``wp_publish.publish_blog_draft``,
+    Application Passwords / OAuth — same path as manual approve). All other channels
+    (webhook, shopify, ghost) go through ``PublisherFactory`` with credentials
+    resolved from the brand's connected IntegrationAccount.
+    """
+    import asyncio
+
+    if channel == "wordpress":
+        from app.services.wp_publish import publish_blog_draft
+        return asyncio.run(publish_blog_draft(db, schedule.brand_id, job, draft, status="publish"))
+
+    from app.models import IntegrationAccount
+    from app.routers.integrations import _credentials_for_account
+
+    account = (
+        db.query(IntegrationAccount)
+        .filter(
+            IntegrationAccount.brand_id == schedule.brand_id,
+            IntegrationAccount.provider == channel,
+            IntegrationAccount.status == "active",
+        )
+        .first()
+    ) or (
+        db.query(IntegrationAccount)
+        .filter(IntegrationAccount.brand_id == schedule.brand_id, IntegrationAccount.provider == channel)
+        .first()
+    )
+    if not account:
+        raise PublishingError(f"No {channel} integration connected for this brand")
+
+    config = {**(account.config or {}), **_credentials_for_account(account, db)}
+    # Per-schedule overrides (if any) win over the account defaults.
+    config.update((schedule.channel_configs or {}).get(channel, {}))
+
+    publisher = PublisherFactory.get_publisher(channel=channel, config=config)
+    result = publisher.publish(_draft_payload(schedule, draft))
+    if account.status != "active":
+        account.status = "active"
+    return result.get("url") or ""
+
+
+def publish_approved_schedule(schedule_id: str) -> None:
+    """Publish a reviewer-approved schedule across all its target channels.
+
+    Entered only after a human approves the generated draft (schedules.approve sets
+    the schedule to PUBLISHING and enqueues this task). Fans out over
+    ``target_channels`` so WordPress and webhook (and other channels) publish in one
+    pass, with isolated per-channel failure handling.
+    """
+    logger.info("Publishing approved schedule %s", schedule_id)
+    db = next(get_db())
+    try:
+        from app.models.blog import BlogJob
+
+        schedule = db.query(BlogSchedule).filter(BlogSchedule.id == schedule_id).first()
+        if not schedule:
+            logger.warning("Schedule %s not found; skipping", schedule_id)
+            return
+        if schedule.status in (ScheduleStatus.PUBLISHED, ScheduleStatus.CANCELLED):
+            logger.info("Schedule %s already %s; skipping", schedule_id, schedule.status)
+            return
+
+        job = db.query(BlogJob).filter(BlogJob.id == schedule.blog_job_id).first() if schedule.blog_job_id else None
+        draft = job.draft if job else None
+        if not job or not draft:
+            schedule.status = ScheduleStatus.FAILED
+            schedule.last_error = "No generated draft available to publish"
+            db.commit()
+            logger.error("Schedule %s has no draft to publish", schedule_id)
+            return
+
+        channels = schedule.target_channels or ["wordpress"]
+        published: Dict[str, str] = {}
+        errors: Dict[str, str] = {}
+        for channel in channels:
+            try:
+                published[channel] = _publish_channel(db, schedule, job, draft, channel)
+            except Exception as exc:  # noqa: BLE001 - isolate per-channel failures
+                logger.exception("Publish to %s failed for schedule %s", channel, schedule_id)
+                errors[channel] = str(exc)
+
+        schedule.published_urls = {**(schedule.published_urls or {}), **published}
+        if published and not errors:
+            schedule.status = ScheduleStatus.PUBLISHED
+            schedule.published_at = datetime.now(timezone.utc)
+            schedule.last_error = None
+            draft.approved = True
+            draft.approved_at = datetime.now(timezone.utc)
+            job.status = "PUBLISHED"
+        else:
+            schedule.status = ScheduleStatus.FAILED
+            schedule.last_error = "; ".join(f"{c}: {e}" for c, e in errors.items())
+            schedule.retry_count = (schedule.retry_count or 0) + 1
+        db.commit()
+        logger.info("Schedule %s publish result: published=%s errors=%s", schedule_id, list(published), list(errors))
+    finally:
+        db.close()
+
+
+def publish_scheduled_blog(schedule_id: str) -> None:
+    """DEPRECATED — legacy time-triggered auto-publish (pre review-gate).
+
+    No longer enqueued: scheduled posts now require explicit reviewer approval
+    (see ``publish_approved_schedule``). Kept for any in-flight RQ jobs.
+
+    Auto-publish a scheduled blog's generated draft to WordPress at its due time.
     """
     import asyncio
 

@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import AuditLog, Brand, BrandKnowledgeSource, BrandProfile, Job
+from app.services.onboarding_pipeline import run_onboarding_pipeline_job
 from tests.conftest import create_user
-from worker.tasks.onboarding import run_onboarding_pipeline
 
 
 def _create_crawl_brand_with_job(db_session: Session) -> tuple[Brand, Job]:
@@ -46,6 +46,8 @@ def stub_pipeline_externals(monkeypatch: pytest.MonkeyPatch) -> None:
         normalized_text: str
         word_count: int
         metadata: dict
+        screenshot_url: str | None = None
+        html_content: str | None = None
 
     @dataclass
     class _FakeResult:
@@ -97,7 +99,7 @@ def test_run_onboarding_pipeline_transitions_and_persists_source(
 ) -> None:
     brand, job = _create_crawl_brand_with_job(db_session)
 
-    run_onboarding_pipeline(job_id=job.id, brand_id=brand.id, db=db_session)
+    run_onboarding_pipeline_job(db_session, job_id=job.id, brand_id=brand.id)
 
     db_session.refresh(job)
     db_session.refresh(brand)
@@ -122,17 +124,17 @@ def test_run_onboarding_pipeline_marks_failure_for_missing_brand(db_session: Ses
     user = create_user(db_session, "worker-onboarding-fail@example.com")
     job = Job(
         org_id=user.org_id,
-        brand_id="missing-brand-id",
+        brand_id="00000000-0000-0000-0000-0000000000ff",
         job_type="brand.onboard",
         status="QUEUED",
         stage="CRAWLING",
-        input_payload={"brand_id": "missing-brand-id"},
+        input_payload={"brand_id": "00000000-0000-0000-0000-0000000000ff"},
     )
     db_session.add(job)
     db_session.commit()
     db_session.refresh(job)
 
-    run_onboarding_pipeline(job_id=job.id, brand_id="missing-brand-id", db=db_session)
+    run_onboarding_pipeline_job(db_session, job_id=job.id, brand_id="00000000-0000-0000-0000-0000000000ff")
 
     db_session.refresh(job)
     assert job.status == "FAILED"

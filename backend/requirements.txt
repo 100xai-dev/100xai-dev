@@ -19,7 +19,8 @@ pinecone-client>=3.2.0
 openai>=1.30.0
 python-multipart>=0.0.9
 pyjwt>=2.9.0
-firecrawl-py>=1.5.0
+firecrawl-py>=1.5.0,<2.0.0  # code uses the v1 API (crawl_url/scrape_url with params=); v2+ renamed these
 bcrypt>=4.0.0
 email-validator>=2.0.0
+razorpay>=1.4.0
 slowapi>=0.1.9
