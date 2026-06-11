@@ -112,7 +112,7 @@ class ContentBrief(BaseModel):
     @field_validator("target_word_count", mode="before")
     @classmethod
     def _coerce_word_count(cls, v):
-        return _coerce_int(v, 2000)
+        return min(_coerce_int(v, 2000), 2500)  # Enforce maximum of 2500 words
 
     @field_validator("ctas", mode="before")
     @classmethod
@@ -167,7 +167,7 @@ class ValidatedSection(BaseModel):
     @field_validator("estimated_words", mode="before")
     @classmethod
     def _coerce_words(cls, v):
-        return _coerce_int(v, 300)
+        return min(_coerce_int(v, 300), 400)  # Cap section length at 400 words
 
 class ValidatedOutline(BaseModel):
     sections: List[ValidatedSection]
@@ -390,7 +390,7 @@ async def generate_content_brief(
     """AI · reads brand profile + serp data (+ retrieved brand knowledge) → content brief"""
 
     knowledge_block = _brand_knowledge_block(brand_knowledge)
-    prompt = f"""Generate a comprehensive content brief for a blog article.
+    prompt = f"""Generate a focused content brief for a blog article optimized for reader engagement.
 
 BRAND PROFILE:
 - Brand: {brand_profile.name}
@@ -412,12 +412,16 @@ Generate a content brief with:
 1. Content goal and type
 2. Target audience
 3. Search intent
-4. Target word count (1500-3000)
+4. Target word count (STRICT MAXIMUM: 2500 words)
 5. Unique content angle
 6. Call-to-action suggestions
-7. Article outline with exactly 8-10 main sections (each section should be substantial and cover different aspects)
+7. Article outline with 5-6 focused main sections (prioritize engagement over comprehensiveness)
 
-IMPORTANT: Generate exactly 8-10 main sections for the table of contents.
+CRITICAL REQUIREMENTS:
+- Maximum 6 sections total
+- Each section should be 300-400 words maximum
+- Prioritize actionable value over exhaustive coverage
+- Focus on 3-5 key takeaways readers actually need
 
 Return ONLY a valid JSON object (no markdown, no prose) with keys: goal, type, audience, intent, word_count, angle, ctas, sections"""
 
@@ -438,7 +442,7 @@ Return ONLY a valid JSON object (no markdown, no prose) with keys: goal, type, a
         content_type=data.get("type", "blog_post"),
         target_audience=data.get("audience", "General audience"),
         search_intent=data.get("intent", "informational"),
-        target_word_count=data.get("word_count", 2000),
+        target_word_count=min(data.get("word_count", 2000), 2500),  # Enforce maximum
         content_angle=data.get("angle", "Comprehensive guide"),
         ctas=data.get("ctas", brand_profile.ctas[:2]),
         sections=data.get("sections", [])
@@ -492,11 +496,10 @@ Return ONLY a valid JSON object (no markdown, no prose) with keys: slug, meta_ti
     )
 
 _DEFAULT_OUTLINE_HEADINGS = [
-    "Introduction",
-    "Key Considerations",
+    "Key Considerations", 
     "Practical Tips",
     "Common Mistakes to Avoid",
-    "Conclusion",
+    "Getting Started",
 ]
 
 
@@ -569,7 +572,7 @@ async def generate_introduction(
     site_url = brand_profile.site_url or ""
     brand_link = f'<a href="{site_url}">{brand_profile.name}</a>' if site_url else brand_profile.name
 
-    prompt = f"""Write an engaging introduction for a blog article.
+    prompt = f"""Write an engaging introduction for a blog article that hooks readers quickly.
 
 CONTENT BRIEF:
 - Goal: {content_brief.goal}
@@ -582,16 +585,18 @@ BRAND VOICE:
 {banned_block}
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword}
-- Include main keyword 2-3 times naturally (targeting 2% density in full article)
+- Include main keyword 1-2 times naturally
 {sub_keywords_str}
 
-Write a 300-500 word introduction that:
-1. Hooks the reader immediately with a concrete scenario, stat, or pain point the audience faces
-2. Introduces the topic naturally with the keyword appearing in the first 100 words
-3. Mentions {brand_profile.name} once naturally, linked: {brand_link}
-4. Sets expectations for what they'll learn
-5. Matches the brand voice and tone
-6. Naturally integrates sub-keywords without forcing them
+Write a 250-350 word introduction that:
+1. Hooks the reader immediately with a concrete scenario, stat, or pain point
+2. Introduces the topic naturally with the keyword in first 100 words
+3. Sets clear expectations for what they'll learn
+4. Avoids promotional language - focus on value to reader
+5. Matches the brand voice authentically
+6. Gets to the point quickly
+
+IMPORTANT: Do not force brand mentions in the introduction. Let readers discover value first.
 
 Return clean HTML using only <p>, <strong>, <em>, <a> tags. No heading tags."""
     
@@ -626,13 +631,13 @@ async def generate_body_sections(
         banned_block = f"NEVER use these phrases: {', '.join(brand_profile.banned_phrases)}\n" if brand_profile.banned_phrases else ""
         site_url = brand_profile.site_url or ""
 
-        prompt = f"""Write a comprehensive section for a blog article.
+        prompt = f"""Write a focused section for a blog article that prioritizes reader engagement.
 
-SECTION DETAILS:
+SECTION REQUIREMENTS:
 - Heading: {section.heading}
-- Phases to cover: {', '.join(section.phases)}
-- Target length: {section.estimated_words} words
+- STRICT LENGTH: Maximum {min(section.estimated_words, 400)} words
 - Section {section.index + 1} of {len(outline.sections)}
+- Focus on 2-3 key actionable points maximum
 
 CONTENT BRIEF:
 - Goal: {content_brief.goal}
@@ -646,17 +651,19 @@ BRAND VOICE:
 {banned_block}{knowledge_block}
 KEYWORD OPTIMIZATION:
 - Main Keyword: {keyword if keyword else 'N/A'}
-- Include main keyword 2-4 times naturally (targeting 2% density overall)
+- Include main keyword 1-2 times naturally
 {sub_keywords_str}
-- Aim for 0.5-1% density for sub-keywords
+- Integrate keywords naturally without stuffing
 
-Write engaging, informative content that:
-1. Thoroughly covers all phases mentioned with concrete examples and numbers
-2. Uses practical, actionable advice
-3. Maintains the brand voice and tone
-4. Is scannable with subheadings where helpful
-5. References {brand_profile.name} at most once if it fits naturally{'; link it to ' + site_url if site_url else ''}
-6. Integrates keywords naturally without stuffing
+Write engaging, scannable content that:
+1. Gets to the point quickly with practical advice
+2. Uses bullet points or lists for easy scanning
+3. Includes 1-2 specific examples or numbers
+4. Maintains brand voice without being verbose
+5. References {brand_profile.name} only if adding genuine value
+6. Stops when the key points are made (don't pad for length)
+
+CRITICAL: Stop writing when you've covered the essential points. Better to be concise than comprehensive.
 
 Return clean HTML using <h2>,<h3>,<p>,<strong>,<ul>,<ol>,<a> tags. No meta-commentary."""
         
@@ -665,7 +672,7 @@ Return clean HTML using <h2>,<h3>,<p>,<strong>,<ul>,<ol>,<a> tags. No meta-comme
             model=get_settings().extraction_model,
             prompt=prompt,
             response_format="text",
-            max_tokens=1200,
+            max_tokens=800,  # Reduced to enforce shorter sections
             temperature=0.6
         )
         
@@ -741,7 +748,7 @@ async def generate_conclusion(
     site_url = brand_profile.site_url or ""
     site_link_rule = f"- Include at least one link to {site_url}" if site_url else ""
 
-    prompt = f"""Write a compelling conclusion for the blog article.
+    prompt = f"""Write a compelling conclusion that motivates reader action.
 
 KEY SECTIONS COVERED:
 {', '.join(key_takeaways)}
@@ -753,7 +760,7 @@ CONTENT BRIEF:
 BRAND CONTEXT:
 - Brand: {brand_profile.name}
 - Unique Angle: {brand_profile.unique_angle}
-- CTAs: {', '.join(brand_profile.ctas)}
+- Primary CTA: {brand_profile.ctas[0] if brand_profile.ctas else 'Take action'}
 {site_link_rule}
 
 KEYWORD OPTIMIZATION:
@@ -761,12 +768,14 @@ KEYWORD OPTIMIZATION:
 - Include main keyword 1-2 times naturally
 {sub_keywords_str}
 
-Write a 300-450 word conclusion that:
-1. Gives 5-7 concrete, action-oriented key takeaways as a bulleted list
-2. Reinforces the main value proposition tying to {brand_profile.unique_angle}
-3. Includes a strong, specific CTA from: {', '.join(brand_profile.ctas)}
+Write a 200-300 word conclusion that:
+1. Gives 3-5 concrete, actionable key takeaways as a bulleted list
+2. Reinforces the main value without being sales-y
+3. Includes ONE focused call-to-action that feels natural
 4. Naturally includes the main keyword 1-2 times
-5. Integrates sub-keywords without forcing them
+5. Ends with encouragement rather than promotion
+
+IMPORTANT: Focus on empowering the reader rather than pushing products. The conclusion should feel like helpful guidance from a trusted expert.
 
 Return clean HTML using only <p>,<strong>,<ul>,<li>,<a> tags."""
     
@@ -793,15 +802,14 @@ async def generate_faq_section(
         section_headings = [s.heading for s in sections]
         sections_context = f"- Article sections covered: {', '.join(section_headings)}"
     
-    prompt = f"""Generate a comprehensive FAQ section for this blog article.
+    prompt = f"""Generate a focused FAQ section addressing the most common questions.
 
 MAIN TOPIC: {keyword}
-SUB-TOPICS/KEYWORDS: {', '.join(sub_keywords[:10])}
+SUB-TOPICS/KEYWORDS: {', '.join(sub_keywords[:5])}
 
 CONTENT CONTEXT:
 - Goal: {content_brief.goal}
 - Target Audience: {content_brief.target_audience}
-- Content Angle: {content_brief.content_angle}
 {sections_context}
 
 BRAND VOICE:
@@ -809,13 +817,14 @@ BRAND VOICE:
 - Brand: {brand_profile.name}
 
 REQUIREMENTS:
-1. Generate 6-8 frequently asked questions
-2. Each question should address real user concerns
-3. Include the main keyword "{keyword}" naturally in 2-3 questions
-4. Include sub-keywords naturally across different Q&As
-5. Each answer should be 100-150 words, informative and actionable
-6. Maintain {brand_profile.tone_rules} tone throughout
-7. Use schema.org FAQ markup structure
+1. Generate 4-5 frequently asked questions only
+2. Each question should address genuine user concerns
+3. Include the main keyword "{keyword}" naturally in 2 questions maximum
+4. Each answer should be 50-80 words, concise and actionable
+5. Maintain {brand_profile.tone_rules} tone throughout
+6. Use schema.org FAQ markup structure
+
+IMPORTANT: Quality over quantity. Better to have 4 excellent Q&As than 8 mediocre ones.
 
 Format as clean HTML with proper FAQ schema markup:
 <div itemscope itemtype="https://schema.org/FAQPage">
@@ -852,29 +861,28 @@ async def generate_brand_value_section(
     proof_points = getattr(brand_profile, "proof_points", None) or []
     proof_line = f"- Proof Points: {', '.join(proof_points)}\n" if proof_points else ""
     knowledge_block = _brand_knowledge_block(brand_knowledge)
-    prompt = f"""Write a compelling section explaining how {brand_profile.name} specifically helps with {keyword}.
+    prompt = f"""Write a brief, value-focused section about how {brand_profile.name} helps with {keyword}.
 
 BRAND CONTEXT:
 - Brand: {brand_profile.name}
 - One-liner: {brand_profile.one_liner}
-- Industry: {brand_profile.industry or 'General'}
 - Unique Angle: {brand_profile.unique_angle}
 - Tone: {brand_profile.tone_rules}
-- CTAs: {', '.join(brand_profile.ctas)}
 {proof_line}{knowledge_block}
 CONTENT CONTEXT:
 - Topic: {keyword}
 - Goal: {content_brief.goal}
 - Target Audience: {content_brief.target_audience}
 
-Write a section that:
+Write a concise section that:
 1. Has the heading "How {brand_profile.name} Helps You With {keyword.title()}"
-2. Explains specific ways the brand addresses the topic/challenges
-3. Highlights unique features, services, or advantages
-4. Shows practical benefits for the target audience
-5. Maintains the brand's tone and voice
-6. Includes a subtle call-to-action
-7. Is 200-300 words
+2. Explains 2-3 specific ways the brand addresses the topic
+3. Highlights practical benefits without being sales-y
+4. Shows genuine value for the target audience
+5. Maintains authentic tone
+6. Is 150-200 words maximum
+
+IMPORTANT: Focus on genuine help and value. Avoid marketing fluff. Be authentic and brief.
 
 Return clean HTML with proper heading and paragraph structure."""
     
@@ -1535,6 +1543,45 @@ def analyze_content_seo_metrics(content: str, main_keyword: str, sub_keywords: L
     
     return metrics
 
+def validate_content_length(article: FinalArticle, target_word_count: int) -> Dict[str, any]:
+    """Validate that content meets length targets and engagement criteria"""
+    actual_words = article.word_count
+    
+    # Check if content is within acceptable range (target ±20%)
+    min_words = int(target_word_count * 0.8)
+    max_words = min(int(target_word_count * 1.2), 2500)  # Hard cap at 2500
+    
+    length_status = "optimal"
+    if actual_words < min_words:
+        length_status = "too_short"
+    elif actual_words > max_words:
+        length_status = "too_long"
+    
+    # Count sections to ensure focused structure
+    section_count = article.html_content.count('<h2')
+    
+    structure_status = "optimal"
+    if section_count > 6:
+        structure_status = "too_many_sections"
+    elif section_count < 3:
+        structure_status = "too_few_sections"
+    
+    return {
+        "word_count": {
+            "actual": actual_words,
+            "target": target_word_count,
+            "min_acceptable": min_words,
+            "max_acceptable": max_words,
+            "status": length_status
+        },
+        "structure": {
+            "section_count": section_count,
+            "max_recommended": 6,
+            "status": structure_status
+        },
+        "overall_quality": "good" if length_status == "optimal" and structure_status == "optimal" else "needs_review"
+    }
+
 # Image generation functions
 async def generate_image_prompt(
     article: FinalArticle,
@@ -1787,6 +1834,12 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         seo_metrics = analyze_content_seo_metrics(final_article.html_content, target_keyword, sub_keywords)
         logger.info(f"SEO Metrics - Main keyword '{target_keyword}' density: {seo_metrics['main_keyword']['density']}% (target: 2%)")
         logger.info(f"SEO Metrics - Sub-keywords analyzed: {len(seo_metrics['sub_keywords'])}")
+        
+        # Validate content length and structure
+        length_validation = validate_content_length(final_article, content_brief.target_word_count)
+        logger.info(f"Content Validation - Words: {length_validation['word_count']['actual']}/{length_validation['word_count']['target']} (Status: {length_validation['word_count']['status']})")
+        logger.info(f"Content Validation - Sections: {length_validation['structure']['section_count']} (Status: {length_validation['structure']['status']})")
+        logger.info(f"Content Validation - Overall Quality: {length_validation['overall_quality']}")
         
         # 10. Save draft
         draft = await save_content_draft(job, final_article, db)

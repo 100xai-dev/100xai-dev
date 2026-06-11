@@ -63,11 +63,15 @@ async def publish_blog_draft(
         raise WPPublishError("No WordPress integration connected for this brand")
 
     credentials = _credentials_for_account(account, db)
-    if not credentials.get("username") or not credentials.get("application_password"):
+    has_app_password = credentials.get("username") and credentials.get("application_password")
+    has_oauth = credentials.get("access_token")
+    if not (has_app_password or has_oauth):
         raise WPPublishError("WordPress integration has no usable credentials")
 
     cfg = dict(account.config or {})
-    if not cfg.get("site_url"):
+    # OAuth accounts don't need site_url (they use WordPress.com API)
+    # Only validate site_url for Application Password accounts
+    if has_app_password and not cfg.get("site_url"):
         raise WPPublishError("WordPress integration is missing site_url")
     cfg["default_status"] = status  # "publish" = live, "draft" = WP draft
 
