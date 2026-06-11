@@ -2,13 +2,18 @@
 import asyncio
 import base64
 import httpx
+import os
 from app.config import get_settings
 
 async def test_dataforseo_auth():
-    login = 'shubhamrathod1619@gmail.com'
-    password = 'uavXu7tE6mr8zgb'
+    login = os.getenv('DATAFORSEO_LOGIN')
+    password = os.getenv('DATAFORSEO_PASSWORD')
     
-    print('Testing DataForSEO Authentication with login:password...')
+    if not login or not password:
+        print('❌ Missing DataForSEO credentials. Please set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD environment variables.')
+        return
+    
+    print(f'Testing DataForSEO Authentication with login: {login[:10]}...')
     
     # Create Basic Auth credentials
     creds = base64.b64encode(f'{login}:{password}'.encode()).decode()

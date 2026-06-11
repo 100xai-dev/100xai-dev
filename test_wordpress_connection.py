@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
 WordPress Connection Test Script
-Debug WordPress integration issues for: assuring-cod-3ba97e.instawp.site
+Debug WordPress integration issues using environment variables for security.
 """
 import asyncio
 import httpx
 import json
+import os
 
 async def test_wordpress_connection():
-    site_url = "https://assuring-cod-3ba97e.instawp.site"
-    username = "xuyagonete8147"
-    # Note: You'll need to provide the actual application password
-    app_password = "GFrz zTOC 4ClR jvoB 4FFM 7ad0"
+    site_url = os.getenv('WORDPRESS_SITE_URL')
+    username = os.getenv('WORDPRESS_USERNAME')
+    app_password = os.getenv('WORDPRESS_APP_PASSWORD')
+    
+    if not all([site_url, username, app_password]):
+        print('❌ Missing WordPress credentials. Please set environment variables:')
+        print('   WORDPRESS_SITE_URL=https://your-site.com')
+        print('   WORDPRESS_USERNAME=your_username')
+        print('   WORDPRESS_APP_PASSWORD=your_app_password')
+        return
     
     print(f"🔗 Testing WordPress connection to: {site_url}")
     print(f"👤 Username: {username}")
@@ -172,6 +179,6 @@ async def test_wordpress_connection():
 
 if __name__ == "__main__":
     print("WordPress Connection Diagnostic Tool")
-    print("Note: Replace 'YOUR_APPLICATION_PASSWORD_HERE' with your actual WordPress application password")
+    print("Note: Set WORDPRESS_SITE_URL, WORDPRESS_USERNAME, and WORDPRESS_APP_PASSWORD environment variables")
     print("=" * 60)
     asyncio.run(test_wordpress_connection())
