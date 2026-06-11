@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { approveBrief, approveArticle, getBlogJob, rejectBrief, rejectArticle, retryBlogJob } from "@/lib/api";
 import type { BlogJobOut } from "@/lib/types";
+import { useSafeHTML } from "@/lib/htmlSanitizer";
 
 const ACTIVE = new Set(["NEW", "RESEARCHING", "BRIEFING", "WRITING", "PUBLISHING"]);
 
@@ -111,6 +112,7 @@ export default function BlogJobPage() {
   const isActive = ACTIVE.has(job.status);
   const brief = job.brief;
   const draft = job.draft;
+  const sanitizedHtmlContent = useSafeHTML(draft?.html_content || "");
 
   return (
     <section className="stack">
@@ -274,7 +276,7 @@ export default function BlogJobPage() {
                 fontSize: "0.9rem",
                 lineHeight: 1.7,
               }}
-              dangerouslySetInnerHTML={{ __html: draft.html_content }}
+              dangerouslySetInnerHTML={sanitizedHtmlContent}
             />
           </div>
 
