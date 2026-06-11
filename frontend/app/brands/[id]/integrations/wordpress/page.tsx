@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-import { getValidAccessToken } from "@/lib/auth";
 
 interface WordPressConfig {
   id?: string;
@@ -84,11 +83,7 @@ export default function WordPressSetupPage() {
   const loadExistingConfig = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/v1/brands/${brandId}/integrations/${editMode}`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/brands/${brandId}/integrations/${editMode}`);
 
       if (response.ok) {
         const integration = await response.json();
@@ -182,14 +177,12 @@ export default function WordPressSetupPage() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${await getValidAccessToken()}`,
             },
           })
         : await fetch(`/api/v1/brands/${brandId}/integrations/wordpress/test`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${await getValidAccessToken()}`,
             },
             body: JSON.stringify({
               ...config,
@@ -235,7 +228,6 @@ export default function WordPressSetupPage() {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
         },
         body: JSON.stringify(integrationData),
       });
@@ -256,9 +248,7 @@ export default function WordPressSetupPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`/api/v1/integrations/wordpress/oauth/start?brand_id=${brandId}`, {
-        headers: { Authorization: `Bearer ${await getValidAccessToken()}` },
-      });
+      const response = await fetch(`/api/v1/integrations/wordpress/oauth/start?brand_id=${brandId}`);
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(typeof body.detail === "string" ? body.detail : "WordPress.com OAuth is not configured");

@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-import { getValidAccessToken } from "@/lib/auth";
 
 interface WebhookConfig {
   id?: string;
@@ -82,11 +81,7 @@ export default function WebhookSetupPage() {
   const loadExistingConfig = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/v1/brands/${brandId}/integrations/${editMode}`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/brands/${brandId}/integrations/${editMode}`);
 
       if (response.ok) {
         const integration = await response.json();
@@ -190,7 +185,6 @@ export default function WebhookSetupPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
         },
         body: JSON.stringify(config),
       });
@@ -232,7 +226,6 @@ export default function WebhookSetupPage() {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
         },
         body: JSON.stringify(integrationData),
       });

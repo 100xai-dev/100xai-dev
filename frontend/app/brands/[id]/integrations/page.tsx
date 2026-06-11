@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
-import { getValidAccessToken } from "@/lib/auth";
 
 interface ChannelIntegration {
   id: string;
@@ -73,11 +72,7 @@ export default function BrandIntegrationsPage() {
   const fetchIntegrations = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/v1/brands/${brandId}/integrations`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/brands/${brandId}/integrations`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch integrations');
@@ -106,9 +101,6 @@ export default function BrandIntegrationsPage() {
       
       const response = await fetch(`/api/v1/brands/${brandId}/integrations/${integration.id}/test`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
       });
       
       if (!response.ok) {
@@ -134,9 +126,6 @@ export default function BrandIntegrationsPage() {
     try {
       const response = await fetch(`/api/v1/brands/${brandId}/integrations/${integrationId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
       });
       
       if (!response.ok) {

@@ -28,7 +28,7 @@ export default async function BrandsPage() {
         <div className="alert alert-warning">
           <span>⚠</span>
           <span>
-            <strong>Demo mode active.</strong> Set <code>API_TOKEN</code> in your environment to connect to the live database.
+            <strong>Demo mode active.</strong> Configure proper authentication to connect to the live database.
           </span>
         </div>
       )}

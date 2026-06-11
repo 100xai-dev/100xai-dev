@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
-import { getValidAccessToken } from "@/lib/auth";
 
 interface OnboardingStatus {
   brand_id: string;
@@ -24,15 +23,6 @@ interface OnboardingStatus {
   completion: number;
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
-async function authedFetch(path: string): Promise<Response> {
-  const token = await getValidAccessToken();
-  return fetch(`${BACKEND}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-}
 
 export default function OnboardingWizardPage() {
   const params = useParams();
@@ -46,7 +36,7 @@ export default function OnboardingWizardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await authedFetch(`/v1/brands/${brandId}/onboarding-status`);
+      const res = await fetch(`/api/v1/brands/${brandId}/onboarding-status`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       setStatus(await res.json());
     } catch (e) {

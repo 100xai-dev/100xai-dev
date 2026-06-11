@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
-import { getValidAccessToken } from "@/lib/auth";
 
 interface PublishingStats {
   brand_id: string;
@@ -104,11 +103,7 @@ export default function PublishingMonitorPage() {
   // Fetch publishing statistics
   const fetchStats = async () => {
     try {
-      const response = await fetch(`/api/v1/publishing/stats?brand_id=${brandId}&days=30`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/publishing/stats?brand_id=${brandId}&days=30`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch publishing stats');
@@ -124,11 +119,7 @@ export default function PublishingMonitorPage() {
   // Fetch publishing queue
   const fetchQueue = async () => {
     try {
-      const response = await fetch(`/api/v1/publishing/queue?brand_id=${brandId}&limit=20`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/publishing/queue?brand_id=${brandId}&limit=20`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch publishing queue');
@@ -144,11 +135,7 @@ export default function PublishingMonitorPage() {
   // Fetch failed jobs
   const fetchFailures = async () => {
     try {
-      const response = await fetch(`/api/v1/publishing/failures?brand_id=${brandId}&days=7&limit=10`, {
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
-      });
+      const response = await fetch(`/api/v1/publishing/failures?brand_id=${brandId}&days=7&limit=10`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch failed jobs');
@@ -168,9 +155,6 @@ export default function PublishingMonitorPage() {
       
       const response = await fetch(`/api/v1/publishing/retry/${queueId}`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${await getValidAccessToken()}`,
-        },
       });
       
       if (!response.ok) {
