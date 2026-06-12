@@ -234,7 +234,7 @@ def _brand_summary(db: Session, brand_id: str, org_id: str) -> BrandSummary:
 
 
 def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
-    return BrandProfileFull.model_construct(
+    return BrandProfileFull(
         id=profile.id,
         brand_id=profile.brand_id,
         name=profile.name,

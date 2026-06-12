@@ -69,3 +69,20 @@ def test_patch_profile_clears_logo_url(
     )
     assert resp.status_code == 200
     assert resp.json()["logo_url"] is None
+
+    db_session.refresh(profile)
+    assert profile.logo_url is None
+
+
+def test_patch_profile_rejects_invalid_logo_url(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session, "logo-invalid@example.com")
+    brand = _reviewable_brand(db_session, user)
+
+    resp = client.patch(
+        f"/v1/brands/{brand.id}/profile",
+        headers=auth_headers(user),
+        json={"logo_url": "not-a-url"},
+    )
+    assert resp.status_code == 422

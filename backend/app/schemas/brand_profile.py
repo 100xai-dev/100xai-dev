@@ -78,6 +78,12 @@ class BrandProfilePatch(BaseModel):
 
 
 class BrandProfileFull(BrandProfileContent, OperationalConfig):
+    # Reads must tolerate legacy/minimal DB rows; min_length=1 applies to input
+    # schemas only.
+    allowed_topics: list[str] = Field(default_factory=list)
+    audience_personas: list[str] = Field(default_factory=list)
+    ctas: list[str] = Field(default_factory=list)
+
     id: str
     brand_id: str
     generation_source: str
