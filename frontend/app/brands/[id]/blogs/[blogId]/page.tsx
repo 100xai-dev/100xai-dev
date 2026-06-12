@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { approveBrief, approveArticle, getBlogJob, rejectBrief, rejectArticle, retryBlogJob } from "@/lib/api";
 import type { BlogJobOut } from "@/lib/types";
-import { useSafeHTML } from "@/lib/htmlSanitizer";
+import { cleanBlogDraftHtml, useSafeHTML } from "@/lib/htmlSanitizer";
 
 const ACTIVE = new Set(["NEW", "RESEARCHING", "BRIEFING", "WRITING", "PUBLISHING"]);
 
@@ -106,13 +106,15 @@ export default function BlogJobPage() {
   }
 
 
+  // Hooks must run on every render — keep this above the early returns below.
+  const sanitizedHtmlContent = useSafeHTML(cleanBlogDraftHtml(job?.draft?.html_content || ""));
+
   if (loading) return <div className="card meta">Loading...</div>;
   if (!job) return <div className="card meta" style={{ color: "var(--danger)" }}>{error || "Not found"}</div>;
 
   const isActive = ACTIVE.has(job.status);
   const brief = job.brief;
   const draft = job.draft;
-  const sanitizedHtmlContent = useSafeHTML(draft?.html_content || "");
 
   return (
     <section className="stack">
@@ -238,67 +240,51 @@ export default function BlogJobPage() {
         </div>
       )}
 
-      {/* Article review */}
+      {/* Article review — rendered as the final published blog post */}
       {job.status === "PENDING_REVIEW" && draft && (
-        <div className="card stack">
-          <h3>[ARTICLE REVIEW] — Approve or reject</h3>
-
-          <div className="row" style={{ gap: 12 }}>
-            <Score label="SEO" value={draft.seo_score} />
-            <Score label="AEO" value={draft.aeo_score} />
-            <Score label="VIRALITY" value={draft.virality_score} />
-            <div className="card" style={{ textAlign: "center", flex: 1 }}>
-              <div className="meta" style={{ marginBottom: 4 }}>WORDS</div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700 }}>{draft.word_count}</div>
+        <>
+          <div className="review-bar">
+            <div className="review-bar-info">
+              <span className="review-bar-label">Review article</span>
+              <span className="review-bar-stats">
+                SEO {draft.seo_score} · AEO {draft.aeo_score} · Virality {draft.virality_score} · {draft.word_count.toLocaleString()} words
+              </span>
+            </div>
+            {error && <span className="text-danger">{error}</span>}
+            <div className="review-bar-actions">
+              <button onClick={() => act(() => approveArticle(brandId, jobId))} disabled={acting}>
+                {acting ? "Processing..." : "✓ Approve & Publish"}
+              </button>
+              <button className="danger" onClick={() => act(() => rejectArticle(brandId, jobId))} disabled={acting}>
+                ✗ Reject
+              </button>
             </div>
           </div>
 
-          <div>
-            <div className="meta" style={{ marginBottom: 4 }}>Title</div>
-            <div style={{ fontWeight: 600, fontSize: "1.1rem" }}>{draft.title}</div>
-          </div>
-
-          <div>
-            <div className="meta" style={{ marginBottom: 4 }}>Meta description</div>
-            <p style={{ margin: 0, fontSize: "0.88rem" }}>{draft.meta_description}</p>
-          </div>
-
-          <div>
-            <div className="meta" style={{ marginBottom: 8 }}>Article content</div>
-            <div
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--line)",
-                borderRadius: 6,
-                padding: "16px 20px",
-                maxHeight: 600,
-                overflowY: "auto",
-                fontSize: "0.9rem",
-                lineHeight: 1.7,
-              }}
-              dangerouslySetInnerHTML={sanitizedHtmlContent}
-            />
-          </div>
-
-          {error && <p className="text-danger">{error}</p>}
-
-          <div className="row" style={{ gap: 12 }}>
-            <button
-              onClick={() => act(() => approveArticle(brandId, jobId))}
-              disabled={acting}
-              style={{ flex: 1 }}
-            >
-              {acting ? "Processing..." : "✓ Approve & Publish"}
-            </button>
-            <button
-              onClick={() => act(() => rejectArticle(brandId, jobId))}
-              disabled={acting}
-              style={{ flex: 1, background: "rgba(255,59,48,0.1)", borderColor: "var(--danger)", color: "var(--danger)" }}
-            >
-              ✗ Reject — Start Over
-            </button>
-          </div>
-        </div>
+          <article className="blog-preview">
+            {draft.featured_image_url && (
+              <img className="blog-preview-hero" src={draft.featured_image_url} alt={draft.title} />
+            )}
+            <div className="blog-preview-inner">
+              {brief && brief.tags.length > 0 && (
+                <div className="blog-preview-tags">
+                  {brief.tags.map((tag) => (
+                    <span key={tag} className="blog-preview-tag">{tag}</span>
+                  ))}
+                </div>
+              )}
+              <h1 className="blog-preview-title">{draft.title}</h1>
+              <p className="blog-preview-lede">{draft.meta_description}</p>
+              <div className="blog-preview-byline">
+                {new Date(draft.created_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+                {" · "}
+                {Math.max(1, Math.round(draft.word_count / 200))} min read
+              </div>
+              <hr className="divider" />
+              <div className="blog-preview-body" dangerouslySetInnerHTML={sanitizedHtmlContent} />
+            </div>
+          </article>
+        </>
       )}
 
       {/* Published */}

@@ -48,6 +48,20 @@ export function sanitizeBlogContent(htmlContent: string): string {
 }
 
 /**
+ * Cleans generator artifacts out of a blog draft before it is rendered as a
+ * finished post: stray markdown code fences (```html / ```) that the section
+ * LLM sometimes emits, and a leading <h1> — the preview shows the title in its
+ * own header, so an embedded one would render as a duplicate.
+ */
+export function cleanBlogDraftHtml(htmlContent: string): string {
+  if (!htmlContent || typeof htmlContent !== 'string') return '';
+  return htmlContent
+    .replace(/```[a-zA-Z]*/g, '')
+    .replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, '')
+    .trim();
+}
+
+/**
  * React hook for safely rendering HTML content
  * Returns sanitized HTML that can be safely used with dangerouslySetInnerHTML
  */
