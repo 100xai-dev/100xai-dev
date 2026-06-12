@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     pinecone_cloud: str = "aws"
     pinecone_region: str = "us-east-1"
     s3_bucket: str = "100xai-uploads"
+    s3_endpoint_url: str | None = None  # e.g. http://minio:9000 (compose) / AWS default if None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    # Base URL browsers/publishers can reach the bucket on. Inside docker the
+    # endpoint is http://minio:9000 (service DNS) but the public URL is
+    # http://localhost:9000 — they differ, hence two settings.
+    s3_public_url: str | None = None
     crawler_user_agent: str = "100xAI-Crawler/1.0 (+https://100xai.example/bot)"
     crawler_max_pages: int = 20
     crawler_page_timeout_sec: int = 20
