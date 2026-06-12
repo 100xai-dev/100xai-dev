@@ -18,6 +18,7 @@ from app.models.onboarding import (
     IntegrationToken,
     Job,
 )
+from app.models.persona import BrandPersona
 from app.models.schedule import (
     BlogSchedule,
     ContentCalendar,
@@ -37,6 +38,7 @@ __all__ = [
     "Brand",
     "BrandKnowledgeChunk",
     "BrandKnowledgeSource",
+    "BrandPersona",
     "BrandProfile",
     "CompetitorAnalysis",
     "ContentCalendar",
