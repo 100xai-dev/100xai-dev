@@ -20,6 +20,7 @@ COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
 # Layer 2: install the backend package itself.
+# NOTE: Sensitive files (.env, venv/, test files, etc.) are excluded via .dockerignore
 COPY backend /app/backend
 RUN pip install -e ./backend || true
 

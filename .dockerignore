@@ -1,0 +1,174 @@
+# Docker ignore file to prevent sensitive files from being included in images
+# This file protects against T2 critical vulnerability where .env files and secrets
+# could be copied into Docker images and exposed in production containers
+
+# =============================================================================
+# CRITICAL: Environment Files and Secrets
+# =============================================================================
+**/.env
+**/.env.*
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+
+# Secret management files
+**/secrets/
+secrets/
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+
+# =============================================================================
+# CRITICAL: Development and Operations Scripts  
+# =============================================================================
+**/setup_ngrok_tunnel.sh
+**/start_backend.sh  
+**/quick_wordpress_setup.sh
+backend/setup_ngrok_tunnel.sh
+backend/start_backend.sh
+backend/quick_wordpress_setup.sh
+quick_wordpress_setup.sh
+
+# Integration documentation (may contain sensitive setup info)
+**/INTEGRATION_IMPLEMENTATION_SUMMARY.md
+**/WORDPRESS_OAUTH_SETUP.md
+backend/INTEGRATION_IMPLEMENTATION_SUMMARY.md
+backend/WORDPRESS_OAUTH_SETUP.md
+
+# =============================================================================
+# Development Databases and Data
+# =============================================================================
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/dev.db
+backend/dev.db
+**/*.log
+**/*.logs
+worker.log
+
+# Test files with potential credentials
+**/test_*.py
+**/*_test.py
+**/debug_*.py
+test_*
+debug_*
+
+# =============================================================================
+# Virtual Environments and Dependencies
+# =============================================================================
+**/venv/
+**/env/
+**/.venv/
+venv/
+env/
+.venv/
+**/.Python
+**/pyvenv.cfg
+
+# Node.js
+**/node_modules/
+node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/.npm
+**/.yarn
+
+# =============================================================================
+# Development Tools and Cache Files
+# =============================================================================
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/.coverage
+**/htmlcov/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# IDE and Editor files
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
+**/.DS_Store
+.DS_Store
+
+# =============================================================================
+# Git and Version Control
+# =============================================================================
+**/.git/
+.git/
+**/.gitignore
+.gitignore
+**/.gitattributes
+
+# =============================================================================
+# Documentation and Media (unless needed in production)
+# =============================================================================
+**/README.md
+**/CHANGELOG.md
+**/LICENSE
+**/docs/
+docs/
+**/*.md
+!requirements*.txt
+!package.json
+!package-lock.json
+
+# =============================================================================
+# Build and Temporary Files  
+# =============================================================================
+**/dist/
+**/build/
+**/.next/
+**/coverage/
+**/tmp/
+**/temp/
+**/*.tmp
+**/*.temp
+
+# Frontend specific (if mixed in backend context)
+**/tsconfig.json
+**/tsconfig.*.json
+**/tsconfig.tsbuildinfo
+**/.eslintrc.*
+**/prettier.config.*
+
+# =============================================================================
+# Development Configuration
+# =============================================================================
+**/docker-compose*.yml
+**/Dockerfile*
+**/.dockerignore
+**/infra/
+
+# Alembic configuration (contains potentially sensitive DB URLs)
+**/alembic.ini
+
+# =============================================================================
+# Application Specific Exclusions
+# =============================================================================
+# FastAPI/SQLAlchemy auto-generated files
+**/*.egg-info/
+
+# Uvicorn/Gunicorn logs and pid files  
+**/*.pid
+**/gunicorn.log
+**/uvicorn.log
+
+# Application data directories that shouldn't be in containers
+**/data/
+**/uploads/
+**/static/media/
+**/user_data/

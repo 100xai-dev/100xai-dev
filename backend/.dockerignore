@@ -1,0 +1,78 @@
+# Backend-specific Docker ignore file
+# Additional protection for backend directory Docker builds
+
+# =============================================================================
+# CRITICAL: Environment and Secrets (Backend Specific)
+# =============================================================================
+.env
+.env.*
+*.env
+
+# Development database
+dev.db
+*.db
+*.sqlite*
+
+# =============================================================================
+# CRITICAL: Operations Scripts with Sensitive Data
+# =============================================================================
+setup_ngrok_tunnel.sh
+start_backend.sh  
+quick_wordpress_setup.sh
+INTEGRATION_IMPLEMENTATION_SUMMARY.md
+WORDPRESS_OAUTH_SETUP.md
+
+# =============================================================================
+# Test Files with Potential Credentials
+# =============================================================================
+test_*.py
+debug_*.py
+*_test.py
+test_wordpress_connection.py
+test_dataforseo_auth.py
+simple_keyword_test.py
+manual_*.py
+
+# =============================================================================
+# Virtual Environment
+# =============================================================================
+venv/
+.venv/
+env/
+.env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =============================================================================
+# Development and Cache Files
+# =============================================================================
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+worker.log
+
+# =============================================================================
+# Configuration Files
+# =============================================================================
+alembic.ini
+# Keep alembic/ directory but be careful about versions with sensitive data
+
+# =============================================================================
+# Documentation and Media
+# =============================================================================
+*.md
+!README.md
+docs/
+prompts/
+
+# =============================================================================
+# Build artifacts
+# =============================================================================
+dist/
+build/
+*.egg-info/
