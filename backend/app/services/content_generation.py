@@ -1834,15 +1834,19 @@ async def run_content_generation_pipeline(db: Session, job_id: str) -> None:
         draft = await save_content_draft(job, final_article, db)
         logger.info(f"Draft saved with ID: {draft.id}")
         
-        # 11. Generate featured image (non-blocking)
-        logger.info("Starting image generation...")
-        image_url = await generate_featured_image(final_article, brand_profile, job, db)
-        
-        if image_url:
-            draft.featured_image_url = image_url
-            logger.info(f"Featured image generated: {image_url}")
+        # 11. Generate featured image (non-blocking, user opt-in)
+        include_image = (job.input_payload or {}).get("include_image", True)
+        if include_image:
+            logger.info("Starting image generation...")
+            image_url = await generate_featured_image(final_article, brand_profile, job, db)
+
+            if image_url:
+                draft.featured_image_url = image_url
+                logger.info(f"Featured image generated: {image_url}")
+            else:
+                logger.warning("Image generation failed, article will be published without featured image")
         else:
-            logger.warning("Image generation failed, article will be published without featured image")
+            logger.info("Image generation skipped — include_image=False on this job")
         
         job.stage = JOB_STAGE_COMPLETE
         job.status = "SUCCEEDED"

@@ -102,6 +102,7 @@ def create_blog_job(
             "created_by": current_user.id,
             "blog_job_id": job_id,     # Link the final draft back to this BlogJob.
             "blog_integration": True,  # Flag: originated from the blog UI.
+            "include_image": payload.include_image,
         },
     )
     db.add(pipeline_job)

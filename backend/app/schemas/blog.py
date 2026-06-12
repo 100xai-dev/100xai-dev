@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 class BlogJobCreate(BaseModel):
     keyword: str
+    include_image: bool = True
 
 
 class BriefSectionOut(BaseModel):

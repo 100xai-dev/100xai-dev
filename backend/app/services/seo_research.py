@@ -928,6 +928,7 @@ def _trigger_content_generation_directly(db, parent_job, keyword: str, parent_pa
         "created_by": parent_payload.get("created_by", "system"),
         "blog_job_id": parent_payload.get("blog_job_id"),
         "blog_integration": True,
+        "include_image": parent_payload.get("include_image", True),
     }
     content_job = Job(
         id=uuid_str(),
@@ -1750,6 +1751,7 @@ async def run_serp_analysis(
                         if blog_job_id:
                             content_payload["blog_job_id"] = blog_job_id
                             content_payload["blog_integration"] = True
+                        content_payload["include_image"] = parent_payload.get("include_image", True)
 
                         # Create content generation job
                         content_job = Job(
