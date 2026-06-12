@@ -234,7 +234,7 @@ def _brand_summary(db: Session, brand_id: str, org_id: str) -> BrandSummary:
 
 
 def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
-    return BrandProfileFull(
+    return BrandProfileFull.model_construct(
         id=profile.id,
         brand_id=profile.brand_id,
         name=profile.name,
@@ -254,6 +254,7 @@ def _profile_to_schema(profile: BrandProfile) -> BrandProfileFull:
         image_subject_hints=profile.image_subject_hints,
         image_palette=profile.image_palette,
         visual_direction=profile.visual_direction,
+        logo_url=profile.logo_url,
         internal_links=profile.internal_links or [],
         placid_template_id=profile.placid_template_id,
         image_output_bucket=profile.image_output_bucket,

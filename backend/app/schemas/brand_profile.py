@@ -36,6 +36,7 @@ class BrandProfileContent(BaseModel):
     image_subject_hints: str | None = None
     image_palette: str | None = None
     visual_direction: str | None = None
+    logo_url: HttpUrl | None = None
 
 
 class OperationalConfig(BaseModel):
@@ -66,6 +67,7 @@ class BrandProfilePatch(BaseModel):
     image_subject_hints: str | None = None
     image_palette: str | None = None
     visual_direction: str | None = None
+    logo_url: HttpUrl | None = None
     internal_links: list[InternalLink] | None = None
     placid_template_id: str | None = None
     image_output_bucket: str | None = None

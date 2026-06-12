@@ -57,6 +57,7 @@ class BrandProfile(Base, TimestampMixin):
     image_subject_hints: Mapped[str | None] = mapped_column(Text)
     image_palette: Mapped[str | None] = mapped_column(Text)
     visual_direction: Mapped[str | None] = mapped_column(Text)
+    logo_url: Mapped[str | None] = mapped_column(String)
     internal_links: Mapped[list[dict]] = mapped_column(JSON, default=list)
     placid_template_id: Mapped[str | None] = mapped_column(String)
     image_output_bucket: Mapped[str | None] = mapped_column(String)
