@@ -703,34 +703,23 @@ Return clean HTML using <h2>,<h3>,<p>,<strong>,<ul>,<ol>,<a> tags. No meta-comme
     return sorted(all_sections, key=lambda s: s.index)
 
 async def generate_table_of_contents(sections: List[GeneratedSection]) -> str:
-    """AI · Table of Contents (Structural — no client fragments)"""
+    """Generate a proper table of contents that links to article sections"""
     
-    section_data = [
-        {"heading": s.heading, "level": s.heading_type}
-        for s in sections
-    ]
+    # Build TOC directly instead of using LLM to avoid placement issues
+    toc_items = []
+    for i, section in enumerate(sections):
+        anchor_id = f"section-{i + 1}"
+        toc_items.append(f'<li><a href="#{anchor_id}">{section.heading}</a></li>')
     
-    prompt = f"""Generate a table of contents for an article.
-
-SECTIONS:
-{json.dumps(section_data, indent=2)}
-
-Create a clean, scannable table of contents that:
-1. Uses proper HTML list structure
-2. Includes anchor links (#section-1, #section-2, etc.)
-3. Shows the content hierarchy clearly
-4. Is styled for easy scanning
-
-Return clean HTML with ordered list structure."""
+    toc_html = f"""
+<div class="table-of-contents">
+    <h2>Table of Contents</h2>
+    <ol>
+        {chr(10).join(toc_items)}
+    </ol>
+</div>"""
     
-    llm = LLMService()
-    return await llm.call(
-        model=get_settings().extraction_model,
-        prompt=prompt,
-        response_format="text",
-        max_tokens=500,
-        temperature=0.3
-    )
+    return toc_html.strip()
 
 async def generate_conclusion(
     content_brief: ContentBrief,
