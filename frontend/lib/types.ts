@@ -183,6 +183,7 @@ export interface BrandProfileContent {
   image_subject_hints?: string | null;
   image_palette?: string | null;
   visual_direction?: string | null;
+  logo_url?: string | null;
 }
 
 export interface InternalLink {

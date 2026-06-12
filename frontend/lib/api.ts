@@ -111,8 +111,15 @@ export async function getJob(jobId: string): Promise<JobRead> {
 }
 
 // Blog
-export async function createBlogJob(brandId: string, keyword: string): Promise<BlogJobOut> {
-  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs`, { method: "POST", body: { keyword } });
+export async function createBlogJob(
+  brandId: string,
+  keyword: string,
+  includeImage: boolean = true,
+): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs`, {
+    method: "POST",
+    body: { keyword, include_image: includeImage },
+  });
 }
 
 export async function listBlogJobs(brandId: string): Promise<{ items: BlogJobOut[] }> {

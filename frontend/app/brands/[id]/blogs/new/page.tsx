@@ -22,6 +22,7 @@ export default function NewBlogPage() {
 
   // Pre-fill from ?keyword= query param (e.g. when arriving from SERP analysis)
   const [keyword, setKeyword] = useState(searchParams.get("keyword") ?? "");
+  const [includeImage, setIncludeImage] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -68,7 +69,7 @@ export default function NewBlogPage() {
     setLoading(true);
     setError("");
     try {
-      const job = await createBlogJob(brandId, keyword.trim());
+      const job = await createBlogJob(brandId, keyword.trim(), includeImage);
       router.push(`/brands/${brandId}/blogs/${job.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create blog job");
@@ -107,6 +108,21 @@ export default function NewBlogPage() {
                 required
               />
             </label>
+
+            <label style={{ flexDirection: "row", alignItems: "center", gap: 10, fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={includeImage}
+                onChange={(e) => setIncludeImage(e.target.checked)}
+                style={{ width: "auto", height: "auto", accentColor: "var(--accent)" }}
+              />
+              Generate a featured image
+            </label>
+            {includeImage && (
+              <p className="meta" style={{ margin: "-8px 0 0 26px", fontSize: "0.78rem" }}>
+                If your brand has a logo set in Brand DNA, it will be stamped on the image.
+              </p>
+            )}
 
             {error && <p className="text-danger" role="alert">{error}</p>}
 

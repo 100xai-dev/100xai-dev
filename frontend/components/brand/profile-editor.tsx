@@ -30,6 +30,7 @@ const NULLABLE_STRING_FIELDS = [
   "image_palette",
   "image_subject_hints",
   "visual_direction",
+  "logo_url",
 ] as const;
 const CSV_FIELDS = [
   "allowed_topics",
@@ -156,6 +157,15 @@ export function ProfileEditor({ profile }: { profile: BrandProfileFull }) {
       <label>
         Visual direction
         <textarea defaultValue={profile.visual_direction ?? ""} name="visual_direction" />
+      </label>
+      <label>
+        Logo URL
+        <input
+          type="url"
+          defaultValue={profile.logo_url ?? ""}
+          name="logo_url"
+          placeholder="https://yourbrand.com/logo.png"
+        />
       </label>
       <button disabled={pending} type="submit">
         {pending ? "Saving..." : "Save profile"}
