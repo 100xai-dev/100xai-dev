@@ -16,6 +16,7 @@ from app.services.llm import LLMService
 from app.services.leonardo import LeonardoService
 from app.services.placid import PlacidService
 from app.services.blog_pipeline import _calc_seo_score, _calc_virality_score
+from app.services.image_branding import brand_featured_image
 
 logger = logging.getLogger(__name__)
 
@@ -1647,7 +1648,20 @@ async def generate_featured_image(
             except Exception as e:
                 logger.warning(f"Placid composition failed, using raw image: {e}")
                 final_image_url = raw_image_url
-        
+
+        # Stamp the brand logo (deterministic Pillow overlay). Fails soft:
+        # branding returning None keeps the unbranded image.
+        if brand_profile.logo_url:
+            branded_url = await brand_featured_image(
+                final_image_url,
+                brand_profile.logo_url,
+                f"branded/{job.id}-featured.jpg",
+            )
+            if branded_url:
+                final_image_url = branded_url
+            else:
+                logger.warning("Logo branding failed for job %s; using unbranded image", job.id)
+
         # Store in brand's bucket
         stored_url = await store_image_in_bucket(
             final_image_url,

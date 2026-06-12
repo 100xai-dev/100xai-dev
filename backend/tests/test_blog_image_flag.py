@@ -95,3 +95,103 @@ def test_direct_content_trigger_propagates_include_image(
     ).first()
     assert content_job is not None
     assert content_job.input_payload["include_image"] is False
+
+
+def test_generate_featured_image_brands_when_logo_set(
+    db_session: Session, monkeypatch
+) -> None:
+    import asyncio
+
+    from app.services import content_generation
+
+    user = create_user(db_session, "img-brand@example.com")
+    brand = _ready_brand(db_session, user)
+    profile = db_session.query(BrandProfile).filter(
+        BrandProfile.brand_id == brand.id
+    ).first()
+    profile.logo_url = "https://acme.example/logo.png"
+    db_session.commit()
+
+    job = Job(
+        org_id=user.org_id,
+        brand_id=brand.id,
+        job_type="content_generation",
+        status="RUNNING",
+        stage="CONTENT",
+        input_payload={"keyword": "warehouse robots"},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    class FakeArticle:
+        meta_title = "Warehouse Robots Guide"
+
+    async def fake_prompt(article, brand_profile):
+        return {"Complete_Prompt": "robots in a warehouse"}
+
+    class FakeLeonardo:
+        async def generate_image(self, prompt):
+            return "https://cdn.leonardo.example/raw.jpg"
+
+    async def fake_brand(image_url, logo_url, key):
+        assert image_url == "https://cdn.leonardo.example/raw.jpg"
+        assert logo_url == "https://acme.example/logo.png"
+        return "http://localhost:9000/bucket/branded.jpg"
+
+    monkeypatch.setattr(content_generation, "generate_image_prompt", fake_prompt)
+    monkeypatch.setattr(content_generation, "LeonardoService", FakeLeonardo)
+    monkeypatch.setattr(content_generation, "brand_featured_image", fake_brand)
+
+    url = asyncio.run(content_generation.generate_featured_image(
+        FakeArticle(), profile, job, db_session
+    ))
+    assert url == "http://localhost:9000/bucket/branded.jpg"
+
+
+def test_generate_featured_image_falls_back_when_branding_fails(
+    db_session: Session, monkeypatch
+) -> None:
+    import asyncio
+
+    from app.services import content_generation
+
+    user = create_user(db_session, "img-fallback@example.com")
+    brand = _ready_brand(db_session, user)
+    profile = db_session.query(BrandProfile).filter(
+        BrandProfile.brand_id == brand.id
+    ).first()
+    profile.logo_url = "https://acme.example/logo.png"
+    db_session.commit()
+
+    job = Job(
+        org_id=user.org_id,
+        brand_id=brand.id,
+        job_type="content_generation",
+        status="RUNNING",
+        stage="CONTENT",
+        input_payload={"keyword": "warehouse robots"},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    class FakeArticle:
+        meta_title = "Warehouse Robots Guide"
+
+    async def fake_prompt(article, brand_profile):
+        return {"Complete_Prompt": "robots in a warehouse"}
+
+    class FakeLeonardo:
+        async def generate_image(self, prompt):
+            return "https://cdn.leonardo.example/raw.jpg"
+
+    async def fake_brand(image_url, logo_url, key):
+        return None  # branding failed (e.g. S3 not configured)
+
+    monkeypatch.setattr(content_generation, "generate_image_prompt", fake_prompt)
+    monkeypatch.setattr(content_generation, "LeonardoService", FakeLeonardo)
+    monkeypatch.setattr(content_generation, "brand_featured_image", fake_brand)
+
+    url = asyncio.run(content_generation.generate_featured_image(
+        FakeArticle(), profile, job, db_session
+    ))
+    assert url == "https://cdn.leonardo.example/raw.jpg"
