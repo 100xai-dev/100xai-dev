@@ -235,3 +235,20 @@ export interface JobRead {
   error_message: string | null;
 }
 
+export interface Persona {
+  id: string;
+  brand_id: string;
+  name: string;
+  domain: string | null;
+  url: string | null;
+  one_liner: string;
+  audience: string;
+  tone_tags: string[];
+  founder_name: string | null;
+  founder_role: string | null;
+  mission: string | null;
+  accent_color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+

@@ -1,5 +1,5 @@
 import { getBackendBaseUrl } from "@/lib/config";
-import type { BlogJobOut } from "@/lib/types";
+import type { BlogJobOut, Persona } from "@/lib/types";
 import type {
   ApproveBrandResponse,
   BillingSubscriptionResponse,
@@ -13,8 +13,22 @@ import type {
   PlanOut,
 } from "@/lib/types";
 
+// Minimal BrandData interface for scheduler persona
+export interface BrandData {
+  name: string;
+  domain: string;
+  url: string;
+  one: string; // one-liner
+  aud: string; // audience
+  tone: string[]; // tone tags
+  founder: string;
+  role: string;
+  mission: string;
+  accent: string; // accent color
+}
+
 type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   cache?: RequestCache;
 };
@@ -256,4 +270,50 @@ export async function getSerpAnalysisResults(brandId: string): Promise<{
   analysis_status: string;
 }> {
   return apiRequest(`/v1/brands/${brandId}/serp-analysis`);
+}
+
+// BrandData (frontend) <-> Persona (backend) field mapping.
+export function personaToBrandData(p: Persona): BrandData {
+  return {
+    name: p.name,
+    domain: p.domain ?? "",
+    url: p.url ?? "",
+    one: p.one_liner,
+    aud: p.audience,
+    tone: p.tone_tags ?? [],
+    founder: p.founder_name ?? "",
+    role: p.founder_role ?? "",
+    mission: p.mission ?? "",
+    accent: p.accent_color ?? "#F58000",
+  };
+}
+
+function brandDataToPayload(d: BrandData) {
+  return {
+    name: d.name,
+    domain: d.domain || null,
+    url: d.url || null,
+    one_liner: d.one,
+    audience: d.aud,
+    tone_tags: d.tone,
+    founder_name: d.founder || null,
+    founder_role: d.role || null,
+    mission: d.mission || null,
+    accent_color: d.accent || null,
+  };
+}
+
+export async function getPersona(brandId: string): Promise<Persona | null> {
+  try {
+    return await apiRequest<Persona>(`/v1/brands/${brandId}/persona`);
+  } catch {
+    return null; // 404 = not composed yet
+  }
+}
+
+export async function savePersona(brandId: string, data: BrandData): Promise<Persona> {
+  return apiRequest<Persona>(`/v1/brands/${brandId}/persona`, {
+    method: "PUT",
+    body: brandDataToPayload(data),
+  });
 }
