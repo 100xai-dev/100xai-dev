@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # bottom-right corner as a fraction of the base width.
 LOGO_WIDTH_RATIO = 0.18
 MARGIN_RATIO = 0.04
+LOGO_MAX_HEIGHT_RATIO = 0.25  # prevents tall/narrow logos from overflowing the canvas
 
 
 def overlay_logo(base_bytes: bytes, logo_bytes: bytes) -> bytes:
@@ -28,8 +29,10 @@ def overlay_logo(base_bytes: bytes, logo_bytes: bytes) -> bytes:
     base = Image.open(BytesIO(base_bytes)).convert("RGB")
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
 
-    target_width = max(1, int(base.width * LOGO_WIDTH_RATIO))
-    scale = target_width / logo.width
+    scale = (base.width * LOGO_WIDTH_RATIO) / logo.width
+    max_height_scale = (base.height * LOGO_MAX_HEIGHT_RATIO) / logo.height
+    scale = min(scale, max_height_scale)
+    target_width = max(1, int(logo.width * scale))
     target_height = max(1, int(logo.height * scale))
     logo = logo.resize((target_width, target_height), Image.LANCZOS)
 
@@ -55,6 +58,9 @@ async def brand_featured_image(image_url: str, logo_url: str, key: str) -> str |
         # boto3 is sync; acceptable here — this runs inside an RQ worker task,
         # not the API event loop.
         return upload_public_image(key, branded)
-    except Exception as exc:
-        logger.warning("Logo branding failed (%s); falling back to unbranded image", exc)
+    except Exception:
+        logger.warning(
+            "Logo branding failed for key=%s image=%s logo=%s; falling back to unbranded image",
+            key, image_url, logo_url, exc_info=True,
+        )
         return None

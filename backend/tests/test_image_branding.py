@@ -105,3 +105,46 @@ def test_brand_featured_image_overlays_and_uploads(
     stamped = Image.open(BytesIO(uploaded["data"])).convert("RGB")
     r, g, b = stamped.getpixel((640 - 40, 360 - 40))
     assert r > 150  # red logo landed bottom-right
+
+
+def test_brand_featured_image_returns_none_on_corrupt_logo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _png_bytes((640, 360), (10, 10, 10, 255))
+    responses = {
+        "https://cdn.example/img.jpg": base,
+        "https://acme.example/logo.svg": b"<svg>not a raster image</svg>",
+    }
+
+    class FakeResponse:
+        def __init__(self, content): self.content = content
+        def raise_for_status(self): ...
+
+    class FakeClient:
+        def __init__(self, *a, **kw): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url): return FakeResponse(responses[url])
+
+    monkeypatch.setattr(image_branding.httpx, "AsyncClient", FakeClient)
+
+    result = asyncio.run(image_branding.brand_featured_image(
+        "https://cdn.example/img.jpg",
+        "https://acme.example/logo.svg",
+        "branded/x.jpg",
+    ))
+    assert result is None
+
+
+def test_overlay_logo_clamps_tall_logos() -> None:
+    base = _png_bytes((1024, 576), (10, 10, 10, 255))
+    tall_logo = _png_bytes((10, 1000), (255, 0, 0, 255))  # extreme portrait logo
+
+    out = image_branding.overlay_logo(base, tall_logo)
+
+    img = Image.open(BytesIO(out)).convert("RGB")
+    assert img.size == (1024, 576)
+    # Logo height is clamped to 25% of base height, so the upper-middle of the
+    # image must remain untouched (no full-height stripe).
+    r, g, b = img.getpixel((1024 - 30, 100))
+    assert r < 60 and g < 60 and b < 60
