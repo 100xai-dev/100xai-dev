@@ -1,31 +1,50 @@
-import { getBackendBaseUrl } from "@/lib/config";
-import type { BlogJobOut, Persona } from "@/lib/types";
+import { getBackendBaseUrl, getServerApiToken } from "@/lib/config";
 import type {
+  AccessTokenResponse,
+  AddSourceRequest,
+  AddSourceResponse,
   ApproveBrandResponse,
+  ApproveBriefRequest,
+  AuthResponse,
   BillingSubscriptionResponse,
+  BlogJobCreate,
+  BlogJobListResponse,
+  BlogJobOut,
   BrandCreateRequest,
   BrandCreateResponse,
   BrandListResponse,
   BrandProfileContent,
   BrandProfileFull,
+  BrandProfilePatch,
+  BrandSourceListResponse,
   BrandSummary,
+  BulkScheduleRequest,
+  BulkScheduleResponse,
+  CalendarEntry,
+  ChannelIntegration,
+  ContentGenerationRequest,
+  ContentGenerationResponse,
+  DeleteBrandResponse,
+  IntegrationListResponse,
+  IntegrationTestResponse,
   JobRead,
+  KeywordListResponse,
+  KeywordResearchRequest,
+  KeywordResearchResponse,
+  KeywordStatsResponse,
+  LoginRequest,
+  MeResponse,
+  PipelineStatusResponse,
   PlanOut,
+  PublishingStatsResponse,
+  ReingestResponse,
+  ScheduleRead,
+  SerpAnalysisResponse,
+  SerpAnalysisStartResponse,
+  SignupRequest,
+  WordPressSetupRequest,
+  WordPressTestRequest,
 } from "@/lib/types";
-
-// Minimal BrandData interface for scheduler persona
-export interface BrandData {
-  name: string;
-  domain: string;
-  url: string;
-  one: string; // one-liner
-  aud: string; // audience
-  tone: string[]; // tone tags
-  founder: string;
-  role: string;
-  mission: string;
-  accent: string; // accent color
-}
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -38,21 +57,18 @@ function isServer(): boolean {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const headers: HeadersInit = { "Content-Type": "application/json" };
-
-  let url: string;
+  // Server components hit the backend directly with the server-only token.
+  // Client components hit the same-origin Next route-handler proxy, which
+  // injects the token server-side so it never reaches the browser.
+  const url = isServer() ? `${getBackendBaseUrl()}${path}` : `/api${path}`;
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
   if (isServer()) {
-    url = `${getBackendBaseUrl()}${path}`;
-    const { cookies } = await import("next/headers");
-    const cookieStore = await cookies();
-    const token = cookieStore.get("100xai_access_token")?.value;
-    if (token) headers.Authorization = `Bearer ${token}`;
-  } else {
-    url = `${getBackendBaseUrl()}${path}`;
-    // Use getValidAccessToken so expired tokens are refreshed before the call
-    const { getValidAccessToken } = await import("@/lib/auth");
-    const token = await getValidAccessToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const token = getServerApiToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
   }
   const response = await fetch(url, {
     method: options.method ?? "GET",
@@ -68,149 +84,180 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
         detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
       }
     } catch {
-      // no-op: body may be empty (e.g. 404 from proxy)
+      // no-op fallback to status text
     }
     throw new Error(detail);
   }
-  // 204 No Content has no body — return null cast to T
-  if (response.status === 204) return null as unknown as T;
-  const text = await response.text();
-  if (!text) return null as unknown as T;
-  return JSON.parse(text) as T;
+  // 204 No Content (logout) — nothing to parse.
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
 }
 
-export async function listBrands(): Promise<BrandListResponse> {
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth — /v1/auth
+// ─────────────────────────────────────────────────────────────────────────────
+export function signup(payload: SignupRequest): Promise<AuthResponse> {
+  return apiRequest<AuthResponse>("/v1/auth/signup", { method: "POST", body: payload });
+}
+
+export function login(payload: LoginRequest): Promise<AuthResponse> {
+  return apiRequest<AuthResponse>("/v1/auth/login", { method: "POST", body: payload });
+}
+
+export function refreshAccessToken(refresh_token: string): Promise<AccessTokenResponse> {
+  return apiRequest<AccessTokenResponse>("/v1/auth/refresh", { method: "POST", body: { refresh_token } });
+}
+
+export function logout(refresh_token: string): Promise<void> {
+  return apiRequest<void>("/v1/auth/logout", { method: "POST", body: { refresh_token } });
+}
+
+export function getMe(): Promise<MeResponse> {
+  return apiRequest<MeResponse>("/v1/auth/me");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Brands — /v1/brands
+// ─────────────────────────────────────────────────────────────────────────────
+export function listBrands(): Promise<BrandListResponse> {
   return apiRequest<BrandListResponse>("/v1/brands");
 }
 
-export async function getBrand(brandId: string): Promise<BrandSummary> {
+export function getBrand(brandId: string): Promise<BrandSummary> {
   return apiRequest<BrandSummary>(`/v1/brands/${brandId}`);
 }
 
-export async function createBrand(payload: BrandCreateRequest): Promise<BrandCreateResponse> {
+export function createBrand(payload: BrandCreateRequest): Promise<BrandCreateResponse> {
   return apiRequest<BrandCreateResponse>("/v1/brands", { method: "POST", body: payload });
 }
 
-export async function requestBrandDelete(brandId: string): Promise<void> {
-  await apiRequest<void>(`/v1/brands/${brandId}`, { method: "DELETE" });
+export function deleteBrand(brandId: string): Promise<DeleteBrandResponse> {
+  return apiRequest<DeleteBrandResponse>(`/v1/brands/${brandId}`, { method: "DELETE" });
 }
 
-export async function getBrandProfile(brandId: string): Promise<BrandProfileFull> {
+// ─────────────────────────────────────────────────────────────────────────────
+// Brand DNA profile — /v1/brands/{id}/profile + /approve
+// ─────────────────────────────────────────────────────────────────────────────
+export function getBrandProfile(brandId: string): Promise<BrandProfileFull> {
   return apiRequest<BrandProfileFull>(`/v1/brands/${brandId}/profile`);
 }
 
-export async function submitManualProfile(brandId: string, payload: BrandProfileContent): Promise<BrandProfileFull> {
-  return apiRequest<BrandProfileFull>(`/v1/brands/${brandId}/profile`, {
-    method: "POST",
-    body: payload,
-  });
+export function submitManualProfile(brandId: string, payload: BrandProfileContent): Promise<BrandProfileFull> {
+  return apiRequest<BrandProfileFull>(`/v1/brands/${brandId}/profile`, { method: "POST", body: payload });
 }
 
-export async function patchProfile(
-  brandId: string,
-  payload: Partial<BrandProfileFull>,
-): Promise<BrandProfileFull> {
-  return apiRequest<BrandProfileFull>(`/v1/brands/${brandId}/profile`, {
-    method: "PATCH",
-    body: payload,
-  });
+export function patchProfile(brandId: string, payload: BrandProfilePatch): Promise<BrandProfileFull> {
+  return apiRequest<BrandProfileFull>(`/v1/brands/${brandId}/profile`, { method: "PATCH", body: payload });
 }
 
-export async function approveBrand(brandId: string): Promise<ApproveBrandResponse> {
+export function approveBrand(brandId: string): Promise<ApproveBrandResponse> {
   return apiRequest<ApproveBrandResponse>(`/v1/brands/${brandId}/approve`, { method: "POST" });
 }
 
-export async function getJob(jobId: string): Promise<JobRead> {
+// ─────────────────────────────────────────────────────────────────────────────
+// Jobs — /v1/jobs/{id} (single job poll; there is no list endpoint)
+// ─────────────────────────────────────────────────────────────────────────────
+export function getJob(jobId: string): Promise<JobRead> {
   return apiRequest<JobRead>(`/v1/jobs/${jobId}`);
 }
 
-// Blog
-export async function createBlogJob(
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 1 — Keyword research (brand-scoped)
+// ─────────────────────────────────────────────────────────────────────────────
+export function startKeywordResearch(
   brandId: string,
-  keyword: string,
-  includeImage: boolean = true,
-): Promise<BlogJobOut> {
-  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs`, {
+  payload: KeywordResearchRequest,
+): Promise<KeywordResearchResponse> {
+  return apiRequest<KeywordResearchResponse>(`/v1/brands/${brandId}/keywords/research`, {
     method: "POST",
-    body: { keyword, include_image: includeImage },
+    body: payload,
   });
 }
 
-export async function listBlogJobs(brandId: string): Promise<{ items: BlogJobOut[] }> {
-  return apiRequest<{ items: BlogJobOut[] }>(`/v1/brands/${brandId}/blogs`);
+export function listKeywords(brandId: string, limit = 50, offset = 0): Promise<KeywordListResponse> {
+  return apiRequest<KeywordListResponse>(`/v1/brands/${brandId}/keywords?limit=${limit}&offset=${offset}`);
 }
 
-export async function getBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
+export function getKeywordStats(brandId: string): Promise<KeywordStatsResponse> {
+  return apiRequest<KeywordStatsResponse>(`/v1/brands/${brandId}/keywords/stats`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 2 — SERP analysis (brand-scoped)
+// ─────────────────────────────────────────────────────────────────────────────
+export function startSerpAnalysis(brandId: string): Promise<SerpAnalysisStartResponse> {
+  return apiRequest<SerpAnalysisStartResponse>(`/v1/brands/${brandId}/serp-analysis`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function getSerpAnalysis(brandId: string): Promise<SerpAnalysisResponse> {
+  return apiRequest<SerpAnalysisResponse>(`/v1/brands/${brandId}/serp-analysis`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 3 — Content generation + pipeline status (brand-scoped)
+// ─────────────────────────────────────────────────────────────────────────────
+export function startContentGeneration(
+  brandId: string,
+  payload: ContentGenerationRequest,
+): Promise<ContentGenerationResponse> {
+  return apiRequest<ContentGenerationResponse>(`/v1/brands/${brandId}/content-generation`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function getPipelineStatus(brandId: string): Promise<PipelineStatusResponse> {
+  return apiRequest<PipelineStatusResponse>(`/v1/brands/${brandId}/pipeline-status`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blogs (content review) — /v1/brands/{id}/blogs
+// ─────────────────────────────────────────────────────────────────────────────
+export function createBlogJob(brandId: string, payload: BlogJobCreate): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs`, { method: "POST", body: payload });
+}
+
+export function listBlogJobs(brandId: string): Promise<BlogJobListResponse> {
+  return apiRequest<BlogJobListResponse>(`/v1/brands/${brandId}/blogs`);
+}
+
+export function getBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
   return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}`);
 }
 
-export async function approveBrief(brandId: string, jobId: string, selectedTitle?: string): Promise<BlogJobOut> {
-  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/approve-brief`, {
-    method: "POST",
-    body: { selected_title: selectedTitle ?? null },
-  });
-}
-
-export async function rejectBrief(brandId: string, jobId: string): Promise<BlogJobOut> {
-  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/reject-brief`, { method: "POST" });
-}
-
-export async function approveArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
+export function approveArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
   return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/approve-article`, { method: "POST" });
 }
 
-export async function rejectArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
+export function rejectArticle(brandId: string, jobId: string): Promise<BlogJobOut> {
   return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/reject-article`, { method: "POST" });
 }
 
-export async function retryBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
+export function retryBlogJob(brandId: string, jobId: string): Promise<BlogJobOut> {
   return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/retry`, { method: "POST" });
 }
 
-// Keyword Research
-export async function startKeywordResearch(brandId: string, seedKeyword: string): Promise<{
-  job_id: string;
-  brand_id: string;
-  seed_keyword: string;
-  status: string;
-  message: string;
-}> {
-  return apiRequest(`/v1/brands/${brandId}/keywords/research`, {
+export function approveBrief(brandId: string, jobId: string, payload: ApproveBriefRequest = {}): Promise<BlogJobOut> {
+  return apiRequest<BlogJobOut>(`/v1/brands/${brandId}/blogs/${jobId}/approve-brief`, {
     method: "POST",
-    body: { seed_keyword: seedKeyword },
+    body: payload,
   });
 }
 
-export async function listKeywords(brandId: string, limit = 50, offset = 0): Promise<{
-  keywords: Array<{
-    id: string;
-    related_keyword: string;
-    primary_keyword: string;
-    source_type: string;
-    search_volume: number | null;
-    keyword_difficulty: number | null;
-    cpc: number | null;
-    competition: number | null;
-    search_intent: string | null;
-    score: number | null;
-    created_at: string;
-  }>;
-  total: number;
-  brand_id: string;
-  latest_job_id: string | null;
-  research_status: string;
-}> {
-  return apiRequest(`/v1/brands/${brandId}/keywords?limit=${limit}&offset=${offset}`);
+// ─────────────────────────────────────────────────────────────────────────────
+// Brand knowledge sources — /v1/brands/{id}/sources
+// ─────────────────────────────────────────────────────────────────────────────
+export function listBrandSources(brandId: string): Promise<BrandSourceListResponse> {
+  return apiRequest<BrandSourceListResponse>(`/v1/brands/${brandId}/sources`);
 }
 
-export async function getKeywordStats(brandId: string): Promise<{
-  total_keywords: number;
-  avg_search_volume: number | null;
-  avg_difficulty: number | null;
-  top_sources: Record<string, number>;
-  completion_rate: number;
-}> {
-  return apiRequest(`/v1/brands/${brandId}/keywords/stats`);
+export function addBrandSource(brandId: string, payload: AddSourceRequest): Promise<AddSourceResponse> {
+  return apiRequest<AddSourceResponse>(`/v1/brands/${brandId}/sources`, { method: "POST", body: payload });
 }
 
 // Billing
@@ -234,86 +281,70 @@ export async function cancelSubscription(): Promise<null> {
   return apiRequest("/v1/billing/cancel", { method: "POST" });
 }
 
-// SERP Analysis (Pipeline 2)
-export async function startSerpAnalysis(brandId: string, keywords?: string[]): Promise<{
-  job_id: string;
-  brand_id: string;
-  keywords_count: number;
-  status: string;
-  message: string;
-}> {
-  return apiRequest(`/v1/brands/${brandId}/serp-analysis`, {
+export function reingestSources(brandId: string): Promise<ReingestResponse> {
+  return apiRequest<ReingestResponse>(`/v1/brands/${brandId}/sources/reingest`, { method: "POST" });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integrations — /v1/brands/{id}/integrations
+// ─────────────────────────────────────────────────────────────────────────────
+export function listIntegrations(brandId: string): Promise<IntegrationListResponse> {
+  return apiRequest<IntegrationListResponse>(`/v1/brands/${brandId}/integrations`);
+}
+
+export function listChannelIntegrations(brandId: string): Promise<ChannelIntegration[]> {
+  return apiRequest<ChannelIntegration[]>(`/v1/brands/${brandId}/integrations?format=channel`);
+}
+
+export function setupWordPress(
+  brandId: string,
+  payload: WordPressSetupRequest,
+): Promise<{ integration_account_id: string; status: string; tested_at: string; site_info: Record<string, unknown> }> {
+  return apiRequest(`/v1/brands/${brandId}/integrations/wordpress`, { method: "POST", body: payload });
+}
+
+export function testWordPress(brandId: string, payload: WordPressTestRequest): Promise<IntegrationTestResponse> {
+  return apiRequest<IntegrationTestResponse>(`/v1/brands/${brandId}/integrations/wordpress/test`, {
     method: "POST",
-    body: keywords ? { target_keywords: keywords } : {},
+    body: payload,
   });
 }
 
-export async function getSerpAnalysisResults(brandId: string): Promise<{
-  serp_analyses: Array<{
-    id: string;
-    keyword_text: string;
-    status: string;
-    total_results_analyzed: number;
-    avg_word_count: number | null;
-    content_gap_score: number | null;
-    created_at: string;
-    competitors: Array<{
-      url: string;
-      title: string;
-      content_strength: number | null;
-      content_gaps: string[];
-      competitive_advantage: string | null;
-    }>;
-  }>;
-  total_analyses: number;
-  latest_job_id: string | null;
-  analysis_status: string;
-}> {
-  return apiRequest(`/v1/brands/${brandId}/serp-analysis`);
-}
-
-// BrandData (frontend) <-> Persona (backend) field mapping.
-export function personaToBrandData(p: Persona): BrandData {
-  return {
-    name: p.name,
-    domain: p.domain ?? "",
-    url: p.url ?? "",
-    one: p.one_liner,
-    aud: p.audience,
-    tone: p.tone_tags ?? [],
-    founder: p.founder_name ?? "",
-    role: p.founder_role ?? "",
-    mission: p.mission ?? "",
-    accent: p.accent_color ?? "#F58000",
-  };
-}
-
-function brandDataToPayload(d: BrandData) {
-  return {
-    name: d.name,
-    domain: d.domain || null,
-    url: d.url || null,
-    one_liner: d.one,
-    audience: d.aud,
-    tone_tags: d.tone,
-    founder_name: d.founder || null,
-    founder_role: d.role || null,
-    mission: d.mission || null,
-    accent_color: d.accent || null,
-  };
-}
-
-export async function getPersona(brandId: string): Promise<Persona | null> {
-  try {
-    return await apiRequest<Persona>(`/v1/brands/${brandId}/persona`);
-  } catch {
-    return null; // 404 = not composed yet
-  }
-}
-
-export async function savePersona(brandId: string, data: BrandData): Promise<Persona> {
-  return apiRequest<Persona>(`/v1/brands/${brandId}/persona`, {
-    method: "PUT",
-    body: brandDataToPayload(data),
+export function testIntegration(brandId: string, providerOrId: string): Promise<IntegrationTestResponse> {
+  return apiRequest<IntegrationTestResponse>(`/v1/brands/${brandId}/integrations/${providerOrId}/test`, {
+    method: "POST",
   });
+}
+
+export function removeIntegration(brandId: string, provider: string): Promise<void> {
+  return apiRequest<void>(`/v1/brands/${brandId}/integrations/${provider}`, { method: "DELETE" });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schedules — /v1/schedules
+// ─────────────────────────────────────────────────────────────────────────────
+export function createSchedulesBulk(brandId: string, payload: BulkScheduleRequest): Promise<BulkScheduleResponse> {
+  return apiRequest<BulkScheduleResponse>(`/v1/schedules/brands/${brandId}/bulk`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function getBrandCalendar(brandId: string, year: number, month: number): Promise<CalendarEntry[]> {
+  return apiRequest<CalendarEntry[]>(`/v1/schedules/brands/${brandId}/calendar?year=${year}&month=${month}`);
+}
+
+export function getSchedule(scheduleId: string): Promise<ScheduleRead> {
+  return apiRequest<ScheduleRead>(`/v1/schedules/${scheduleId}`);
+}
+
+export function deleteSchedule(scheduleId: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(`/v1/schedules/${scheduleId}`, { method: "DELETE" });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Publishing monitoring — /v1/publishing
+// ─────────────────────────────────────────────────────────────────────────────
+export function getPublishingStats(brandId: string, days = 30): Promise<PublishingStatsResponse> {
+  return apiRequest<PublishingStatsResponse>(`/v1/publishing/stats?brand_id=${brandId}&days=${days}`);
 }

@@ -45,7 +45,7 @@ const mockProfile: BrandProfileFull = {
   publish_config: {},
   generation_source: "playwright_crawler_v1",
   prompt_version: "v1.4",
-  extraction_model: "anthropic/claude-haiku-4-5-20251001",
+  extraction_model: "claude-3-5-sonnet-20241022",
   locked: false,
   locked_at: null,
   locked_by: null,

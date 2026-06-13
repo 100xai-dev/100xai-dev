@@ -6,9 +6,11 @@ import { getJob } from "@/lib/api";
 import type { JobRead } from "@/lib/types";
 
 const POLL_INTERVAL_MS = 3_000;
-const ACTIVE_STATUSES = new Set(["QUEUED", "NEW", "RUNNING", "SCHEDULED"]);
+const ACTIVE_STATUSES = new Set(["QUEUED", "NEW", "RUNNING", "PROCESSING", "SCHEDULED", "GENERATING", "WRITING"]);
+const DONE_STATUSES = new Set(["SUCCEEDED", "COMPLETED", "PUBLISHED"]);
 
-const stageOrder = ["CRAWLING", "EXTRACTING", "INGESTING"];
+// Generic pipeline stage progression (keyword → serp → content → draft).
+const stageOrder = ["KEYWORD", "SERP", "CONTENT", "DRAFT", "IMAGE", "COMPLETE"];
 
 function isActive(status: string | null | undefined): boolean {
   return ACTIVE_STATUSES.has((status ?? "").toUpperCase());
@@ -56,13 +58,17 @@ export function JobStatusLive({
 
   if (variant === "compact") {
     const stageIdx = stageOrder.indexOf((job.stage ?? "").toUpperCase());
-    const pct = stageIdx >= 0 ? Math.round(((stageIdx + 1) / stageOrder.length) * 100) : (job.status === "COMPLETED" ? 100 : 0);
+    const pct = DONE_STATUSES.has(job.status.toUpperCase())
+      ? 100
+      : stageIdx >= 0
+        ? Math.round(((stageIdx + 1) / stageOrder.length) * 100)
+        : 0;
 
     return (
       <div className="stack stack-sm">
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 16px", alignItems: "center" }}>
           <span className="meta">Status</span>
-          <span style={{ fontSize: "0.875rem", fontWeight: 600, color: job.status === "FAILED" ? "var(--danger)" : job.status === "COMPLETED" ? "var(--success)" : "var(--accent)" }}>
+          <span style={{ fontSize: "0.875rem", fontWeight: 600, color: job.status === "FAILED" ? "var(--danger)" : DONE_STATUSES.has(job.status.toUpperCase()) ? "var(--success)" : "var(--accent)" }}>
             {job.status}
           </span>
           <span className="meta">Stage</span>

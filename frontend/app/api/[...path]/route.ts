@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getBackendBaseUrl } from "@/lib/config";
+import { getBackendBaseUrl, getServerApiToken } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ async function proxy(request: NextRequest, params: Promise<{ path: string[] }>):
       headers.set(name, value);
     }
   }
-  const token = request.cookies.get("100xai_access_token")?.value;
+  const token = getServerApiToken();
   if (token) {
     headers.set("authorization", `Bearer ${token}`);
   }

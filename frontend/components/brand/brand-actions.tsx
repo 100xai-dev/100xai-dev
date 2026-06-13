@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { approveBrand, requestBrandDelete } from "@/lib/api";
+import { approveBrand, deleteBrand } from "@/lib/api";
 import type { BrandSummary } from "@/lib/types";
 
 export function BrandActions({ brand }: { brand: BrandSummary }) {
@@ -34,8 +34,8 @@ export function BrandActions({ brand }: { brand: BrandSummary }) {
     try {
       setPending("delete");
       setMessage(null);
-      await requestBrandDelete(brand.id);
-      setMessage({ type: "info", text: `Brand "${brand.name}" deleted.` });
+      await deleteBrand(brand.id);
+      setMessage({ type: "info", text: "Brand deleted." });
       router.push("/brands");
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "Failed to request delete" });

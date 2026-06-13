@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { getValidAccessToken } from "@/lib/auth";
 
 interface ReviewItem {
   id: string;
@@ -20,6 +21,16 @@ interface ReviewItem {
   };
 }
 
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getValidAccessToken();
+  return fetch(`${BACKEND}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    cache: "no-store",
+  });
+}
 
 export default function ReviewQueuePage() {
   const params = useParams();
@@ -34,7 +45,7 @@ export default function ReviewQueuePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/schedules/brands/${brandId}/review-queue`);
+      const res = await authedFetch(`/v1/schedules/brands/${brandId}/review-queue`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       setItems(await res.json());
     } catch (e) {
@@ -50,9 +61,8 @@ export default function ReviewQueuePage() {
     setBusy(scheduleId);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/schedules/${scheduleId}/${action}`, {
+      const res = await authedFetch(`/v1/schedules/${scheduleId}/${action}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: action === "reject" ? JSON.stringify({ reason: "Rejected by reviewer" }) : undefined,
       });
       if (!res.ok) {

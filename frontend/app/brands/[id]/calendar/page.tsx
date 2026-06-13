@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { getValidAccessToken } from "@/lib/auth";
 
 interface ScheduleItem {
   id: string;
@@ -33,6 +34,8 @@ const CHIP: Record<string, { bg: string; text: string; dot: string }> = {
   default:    { bg: "#f3e5f5", text: "#6a1b9a", dot: "#8e24aa" },
 };
 const chipStyle = (s: string) => CHIP[s] ?? CHIP.default;
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -64,6 +67,14 @@ function buildGrid(year: number, month: number): Date[] {
   return days;
 }
 
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getValidAccessToken();
+  return fetch(`${BACKEND}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    cache: "no-store",
+  });
+}
 
 export default function CalendarPage() {
   const params = useParams();
@@ -89,7 +100,7 @@ export default function CalendarPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/schedules/brands/${brandId}/calendar?year=${year}&month=${month + 1}`);
+      const res = await authedFetch(`/v1/schedules/brands/${brandId}/calendar?year=${year}&month=${month + 1}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       setItems(await res.json());
     } catch (e) {
@@ -139,9 +150,8 @@ export default function CalendarPage() {
     setError(null);
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const res = await fetch(`/api/v1/schedules/brands/${brandId}/bulk`, {
+      const res = await authedFetch(`/v1/schedules/brands/${brandId}/bulk`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: payloadItems, time, timezone: tz, channels: ["wordpress"] }),
       });
       if (!res.ok) {
@@ -163,9 +173,8 @@ export default function CalendarPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/schedules/${scheduleId}/${action}`, {
+      const res = await authedFetch(`/v1/schedules/${scheduleId}/${action}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: action === "reject" ? JSON.stringify({ reason: "Rejected from calendar" }) : undefined,
       });
       if (!res.ok) {

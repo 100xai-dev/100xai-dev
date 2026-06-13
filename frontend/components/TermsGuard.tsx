@@ -4,13 +4,15 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "@/context/AuthContext";
 
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+
 /**
  * Mounted in the root layout. When a signed-in user has not accepted the current
  * Terms & Conditions version, it shows a blocking modal that must be accepted
  * before continuing.
  */
 export function TermsGuard() {
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
   const [required, setRequired] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -21,7 +23,11 @@ export function TermsGuard() {
     }
     let cancelled = false;
     (async () => {
-      const res = await fetch("/api/v1/auth/me").catch(() => null);
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch(`${BACKEND}/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => null);
       if (!res || !res.ok) return;
       const data = (await res.json()) as { terms_acceptance_required?: boolean };
       if (!cancelled) setRequired(Boolean(data.terms_acceptance_required));
@@ -29,13 +35,16 @@ export function TermsGuard() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, getToken]);
 
   async function accept() {
     setSubmitting(true);
     try {
-      const res = await fetch("/api/v1/auth/accept-terms", {
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch(`${BACKEND}/v1/auth/accept-terms`, {
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setRequired(false);
     } finally {
