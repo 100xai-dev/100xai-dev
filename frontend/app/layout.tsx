@@ -4,7 +4,6 @@ import { Fraunces, Montserrat, JetBrains_Mono, Cormorant_Garamond, Inter } from 
 import { AuthProvider } from "@/context/AuthContext";
 import { TermsGuard } from "@/components/TermsGuard";
 import "./globals.css";
-import { SchedulerProvider } from "@/lib/scheduler/context";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -56,7 +55,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     >
       <body>
         <AuthProvider>
-          <SchedulerProvider>{children}</SchedulerProvider>
+          {children}
           <TermsGuard />
         </AuthProvider>
       </body>

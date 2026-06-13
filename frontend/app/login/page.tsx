@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-  const doLogin = () => router.push("/onboarding");
+  const doLogin = () => router.push("/brands");
 
   return (
     <div className="login-screen">
