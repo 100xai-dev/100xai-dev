@@ -1,4 +1,4 @@
-import { getBackendBaseUrl, getServerApiToken } from "@/lib/config";
+import { getBackendBaseUrl } from "@/lib/config";
 import type {
   AccessTokenResponse,
   AddSourceRequest,
@@ -65,7 +65,9 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     "Content-Type": "application/json",
   };
   if (isServer()) {
-    const token = getServerApiToken();
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const token = cookieStore.get("100xai_access_token")?.value;
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
