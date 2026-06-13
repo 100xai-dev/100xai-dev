@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getBackendBaseUrl, getServerApiToken } from "@/lib/config";
+import { getBackendBaseUrl } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +24,16 @@ async function proxy(request: NextRequest, params: Promise<{ path: string[] }>):
 
   const headers = new Headers();
   for (const [name, value] of request.headers.entries()) {
-    if (!HOP_BY_HOP.has(name.toLowerCase()) && name.toLowerCase() !== "authorization") {
+    if (!HOP_BY_HOP.has(name.toLowerCase())) {
       headers.set(name, value);
     }
   }
-  const token = getServerApiToken();
-  if (token) {
-    headers.set("authorization", `Bearer ${token}`);
+  // Forward the logged-in user's token. The browser sends the 100xai_access_token
+  // cookie (set by lib/auth.ts on login/refresh); promote it to an Authorization
+  // header when the client did not already attach one explicitly.
+  if (!headers.has("authorization")) {
+    const cookieToken = request.cookies.get("100xai_access_token")?.value;
+    if (cookieToken) headers.set("authorization", `Bearer ${cookieToken}`);
   }
 
   const method = request.method.toUpperCase();
