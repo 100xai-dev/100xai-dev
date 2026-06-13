@@ -5,6 +5,13 @@ const PUBLIC_PATHS = ["/login", "/signup", "/verify-email", "/terms", "/privacy"
 export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
+  // The marketing landing page is always public — viewable logged in or out.
+  // (Exact match: adding "/" to PUBLIC_PATHS would make every path public,
+  // since every pathname startsWith "/".)
+  if (pathname === "/") {
+    return NextResponse.next();
+  }
+
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const token = request.cookies.get("100xai_access_token")?.value;
 
