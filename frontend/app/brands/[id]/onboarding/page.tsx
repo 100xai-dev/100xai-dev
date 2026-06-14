@@ -24,7 +24,7 @@ interface OnboardingStatus {
   completion: number;
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "/api";
 
 async function authedFetch(path: string): Promise<Response> {
   const token = await getValidAccessToken();

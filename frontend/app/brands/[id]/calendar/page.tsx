@@ -35,7 +35,7 @@ const CHIP: Record<string, { bg: string; text: string; dot: string }> = {
 };
 const chipStyle = (s: string) => CHIP[s] ?? CHIP.default;
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "/api";
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

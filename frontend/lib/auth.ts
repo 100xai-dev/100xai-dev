@@ -49,7 +49,7 @@ export function isTokenExpired(token: string): boolean {
   }
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "/api";
 
 export async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = getRefreshToken();
