@@ -68,3 +68,4 @@ export const POST = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params);
 export const PATCH = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params);
 export const PUT = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params);
 export const DELETE = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params);
+export const OPTIONS = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params);
