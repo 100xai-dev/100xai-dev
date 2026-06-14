@@ -139,8 +139,6 @@ docs/
 **/*.temp
 
 # Frontend specific (if mixed in backend context)
-**/tsconfig.json
-**/tsconfig.*.json
 **/tsconfig.tsbuildinfo
 **/.eslintrc.*
 **/prettier.config.*
@@ -153,8 +151,8 @@ docs/
 **/.dockerignore
 **/infra/
 
-# Alembic configuration (contains potentially sensitive DB URLs)
-**/alembic.ini
+# Alembic configuration is intentionally included — env.py reads DATABASE_URL
+# from environment variables, so the ini file itself contains no live secrets.
 
 # =============================================================================
 # Application Specific Exclusions
