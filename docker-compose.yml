@@ -35,6 +35,14 @@ services:
       APP_URL: ${APP_URL:-http://localhost:8000}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       WPCOM_REDIRECT_URI: ${WPCOM_REDIRECT_URI:-http://localhost:8000/v1/integrations/wordpress/oauth/callback}
+      # --- Email (Brevo SMTP relay) ---
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-no-reply@100xai.co}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     ports:
       - "8000:8000"
     depends_on:
