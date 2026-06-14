@@ -26,49 +26,28 @@ app = FastAPI(
     redoc_url="/redoc" if _is_dev else None,
 )
 
-# Custom CORS middleware to handle ngrok domains
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+# CORS: allow the production frontends, local dev, and any ngrok tunnel.
+# Starlette's CORSMiddleware answers preflight OPTIONS correctly for every
+# allowed origin (returning 200 with the right headers) instead of falling
+# through to the route and returning a spurious 405.
+_allowed_origins = {
+    "https://app.100xai.co",
+    "https://www.100xai.co",
+    "https://100xai.co",
+    "http://localhost:3000",
+    # Always trust the explicitly configured frontend (strip any trailing slash
+    # so it matches the browser's slash-less Origin header).
+    _settings.frontend_url.rstrip("/"),
+}
 
-class NgrokCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        origin = request.headers.get("origin")
-        
-        # Handle preflight OPTIONS requests
-        if request.method == "OPTIONS":
-            if origin and (
-                origin.startswith("http://localhost:") or
-                origin == _settings.frontend_url or
-                (origin.startswith("https://") and (".ngrok.io" in origin or ".ngrok.app" in origin or ".ngrok-free.app" in origin))
-            ):
-                return Response(
-                    content="",
-                    status_code=200,
-                    headers={
-                        "Access-Control-Allow-Origin": origin,
-                        "Access-Control-Allow-Credentials": "true",
-                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since",
-                        "Access-Control-Max-Age": "86400"
-                    }
-                )
-        
-        response = await call_next(request)
-        
-        # Allow local development, ngrok, and configured production frontend
-        if origin and (
-            origin.startswith("http://localhost:") or
-            origin == _settings.frontend_url or
-            (origin.startswith("https://") and (".ngrok.io" in origin or ".ngrok.app" in origin or ".ngrok-free.app" in origin))
-        ):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since"
-        
-        return response
-
-app.add_middleware(NgrokCORSMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=sorted(_allowed_origins),
+    allow_origin_regex=r"https://[^/]+\.(ngrok\.io|ngrok\.app|ngrok-free\.app)",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
