@@ -11,7 +11,7 @@ RUN apk add --no-cache libc6-compat
 
 # Copy package files and install all dependencies (including dev for build)
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm install --no-package-lock
 
 # Copy source code (entire frontend directory)
 COPY frontend/ ./
