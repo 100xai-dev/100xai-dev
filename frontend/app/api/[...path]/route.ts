@@ -33,12 +33,6 @@ async function proxy(request: NextRequest, params: Promise<{ path: string[] }>):
   // header when the client did not already attach one explicitly.
   if (!headers.has("authorization")) {
     const cookieToken = request.cookies.get("100xai_access_token")?.value;
-    console.log(
-      `[BFF] ${request.method} /${path.join("/")} ` +
-      `rawCookieHeader=${request.headers.get("cookie") ? "present" : "absent"} ` +
-      `cookieToken=${cookieToken ? "found" : "missing"} ` +
-      `cookieNames=[${request.cookies.getAll().map((c) => c.name).join(",")}]`
-    );
     if (cookieToken) headers.set("authorization", `Bearer ${cookieToken}`);
   }
 
