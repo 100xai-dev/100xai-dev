@@ -13,7 +13,8 @@ import {
   saveSession,
 } from "@/lib/auth";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+// Use the Next.js API proxy instead of direct backend calls
+const API_BASE = "/api";
 
 type AuthState = {
   user: UserOut | null;
@@ -65,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await fetch(`${BACKEND}/v1/auth/login`, {
+    const res = await fetch(`${API_BASE}/v1/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -94,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string,
     orgName: string,
   ) => {
-    const res = await fetch(`${BACKEND}/v1/auth/signup`, {
+    const res = await fetch(`${API_BASE}/v1/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password, organization_name: orgName, accept_terms: true }),
@@ -108,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const verifyEmail = useCallback(async (token: string) => {
-    const res = await fetch(`${BACKEND}/v1/auth/verify-email`, {
+    const res = await fetch(`${API_BASE}/v1/auth/verify-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
@@ -123,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applySession, router]);
 
   const resendVerification = useCallback(async (email: string) => {
-    await fetch(`${BACKEND}/v1/auth/resend-verification`, {
+    await fetch(`${API_BASE}/v1/auth/resend-verification`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -133,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     const refreshToken = getRefreshToken();
     if (refreshToken) {
-      await fetch(`${BACKEND}/v1/auth/logout`, {
+      await fetch(`${API_BASE}/v1/auth/logout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
