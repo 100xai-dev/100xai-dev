@@ -2,17 +2,12 @@
 # Caddy automatically provisions and renews HTTPS certificates via Let's Encrypt.
 
 app.100xai.co {
-    # API calls from the browser go directly to the FastAPI backend
-    # Strip /api prefix so backend sees /v1/... not /api/v1/...
-    handle /api/* {
-        uri strip_prefix /api
-        reverse_proxy api:8000
-    }
-
-    # Everything else goes to the Next.js frontend
-    handle {
-        reverse_proxy frontend:3000
-    }
+    # Everything — including /api/* — goes to the Next.js frontend.
+    # The Next BFF proxy (app/api/[...path]/route.ts) handles /api/*, reading the
+    # 100xai_access_token cookie and injecting it as an Authorization header before
+    # forwarding to the backend. Routing /api/* straight to api:8000 here would
+    # bypass that proxy, so authenticated requests would arrive without a token.
+    reverse_proxy frontend:3000
 }
 
 api.100xai.co {
