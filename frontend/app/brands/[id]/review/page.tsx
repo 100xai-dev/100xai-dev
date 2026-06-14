@@ -40,6 +40,7 @@ export default function ReviewQueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +57,21 @@ export default function ReviewQueuePage() {
   }, [brandId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // When arrived from the calendar with a #sched-<id> anchor, scroll to that
+  // post and briefly highlight it once the queue has loaded.
+  useEffect(() => {
+    if (loading || items.length === 0) return;
+    const m = window.location.hash.match(/^#sched-(.+)$/);
+    if (!m) return;
+    const id = m[1];
+    const el = document.getElementById(`sched-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlight(id);
+    const t = setTimeout(() => setHighlight(null), 2500);
+    return () => clearTimeout(t);
+  }, [loading, items]);
 
   async function act(scheduleId: string, action: "approve" | "reject") {
     setBusy(scheduleId);
@@ -110,7 +126,16 @@ export default function ReviewQueuePage() {
       ) : (
         <div className="stack">
           {items.map((it) => (
-            <div key={it.id} className="card" style={{ padding: "20px 22px" }}>
+            <div
+              key={it.id}
+              id={`sched-${it.id}`}
+              className="card"
+              style={{
+                padding: "20px 22px",
+                transition: "box-shadow .3s, border-color .3s",
+                ...(highlight === it.id ? { boxShadow: "0 0 0 3px var(--accent)", borderColor: "var(--accent)" } : {}),
+              }}
+            >
               <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
                 {it.draft.featured_image_url && (
                   // eslint-disable-next-line @next/next/no-img-element

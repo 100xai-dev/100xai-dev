@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
-import { createSchedulesBulk, deleteSchedule, getBrandCalendar } from "@/lib/api";
+import { createSchedulesBulk, getBrandCalendar } from "@/lib/api";
 import type { BrandStatus, CalendarEntry } from "@/lib/types";
 
 const MONTHS = [
@@ -38,6 +39,7 @@ export function ContentCalendar({
   initialMonth: number; // 1-12
   initialEntries: CalendarEntry[];
 }) {
+  const router = useRouter();
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [entries, setEntries] = useState<CalendarEntry[]>(initialEntries);
@@ -115,15 +117,18 @@ export function ContentCalendar({
     }
   }
 
-  async function onDelete(entry: CalendarEntry) {
-    if (entry.status === "PUBLISHED") return;
-    if (!window.confirm(`Cancel scheduled post "${entry.title}"?`)) return;
-    try {
-      await deleteSchedule(entry.id);
-      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete schedule");
+  function onEntryClick(entry: CalendarEntry) {
+    // Published posts: jump straight to the live article if we have a URL.
+    if (entry.status === "PUBLISHED") {
+      const url = Object.values(entry.published_urls ?? {})[0];
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
     }
+    // Everything else: open the Review & Publish queue anchored to this post,
+    // where its draft can be previewed, approved or rejected.
+    router.push(`/brands/${brandId}/review#sched-${entry.id}`);
   }
 
   // Build month grid (Monday-first).
@@ -233,8 +238,8 @@ export function ContentCalendar({
                 <div
                   key={e.id}
                   className={`cal-event ${e.status}`}
-                  title={`${e.title} · ${e.status}${e.last_error ? ` · ${e.last_error}` : ""}`}
-                  onClick={() => onDelete(e)}
+                  title={`${e.title} · ${e.status}${e.last_error ? ` · ${e.last_error}` : ""} · click to review`}
+                  onClick={() => onEntryClick(e)}
                 >
                   <span className="ce-t">{timePart(e.scheduled_at)}</span>
                   <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.title}</div>
@@ -244,7 +249,7 @@ export function ContentCalendar({
           );
         })}
       </div>
-      <p className="meta">Tip: click a scheduled (not yet published) post to cancel it.</p>
+      <p className="meta">Tip: click a post to preview, approve or reject its generated draft. Published posts open the live article.</p>
     </div>
   );
 }

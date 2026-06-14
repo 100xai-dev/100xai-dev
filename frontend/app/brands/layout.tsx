@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { LogoutButton } from "@/components/LogoutButton";
+
 // Brand-admin shell. Editorial theme — warm background + centered column.
 // Kept intentionally light so it composes with the existing globals.css theme.
 export default function BrandsLayout({ children }: { children: ReactNode }) {
@@ -22,6 +24,7 @@ export default function BrandsLayout({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav-links">
           <Link href="/brands">Brands</Link>
+          <LogoutButton />
         </nav>
       </header>
       <main className="admin-shell">{children}</main>
