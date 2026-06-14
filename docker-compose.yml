@@ -4,7 +4,11 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.frontend
     environment:
-      BACKEND_URL: https://api.100xai.co
+      # The Next BFF proxy (app/api/[...path]/route.ts) forwards server-side from
+      # inside this container, so it must reach the backend over the internal
+      # Docker network — NOT the public domain (which would hairpin through Caddy
+      # and is unreachable from within the container).
+      BACKEND_URL: http://api:8000
       NODE_ENV: production
     ports:
       - "3000:3000"
