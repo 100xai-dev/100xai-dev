@@ -23,6 +23,13 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.backend
+    # Load all application credentials (API keys, SMTP, etc.) from backend/.env.
+    # Read from the host at container start, so .dockerignore does not apply.
+    env_file:
+      - ./backend/.env
+    # NOTE: environment values below OVERRIDE env_file. Only infra endpoints that
+    # must point at Docker service names live here; everything else comes from
+    # backend/.env so it is not silently shadowed.
     environment:
       DATABASE_URL: postgresql+psycopg://100xai:100xai@postgres:5432/100xai
       REDIS_URL: redis://redis:6379/0
@@ -35,14 +42,6 @@ services:
       APP_URL: ${APP_URL:-http://localhost:8000}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       WPCOM_REDIRECT_URI: ${WPCOM_REDIRECT_URI:-http://localhost:8000/v1/integrations/wordpress/oauth/callback}
-      # --- Email (Brevo SMTP relay) ---
-      EMAIL_BACKEND: ${EMAIL_BACKEND:-console}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-no-reply@100xai.co}
-      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     ports:
       - "8000:8000"
     depends_on:
@@ -62,6 +61,9 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker
+    # Workers run the pipelines that need the LLM / SERP / scraping API keys.
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://100xai:100xai@postgres:5432/100xai
       REDIS_URL: redis://redis:6379/0
