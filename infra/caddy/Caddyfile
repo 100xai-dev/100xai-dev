@@ -1,0 +1,13 @@
+# 100xAI Reverse Proxy
+# Caddy automatically provisions and renews HTTPS certificates via Let's Encrypt.
+# Ensure DNS A records for both domains point to this server's public IP before starting.
+
+app.100xai.co {
+    # Proxy all traffic to the Next.js frontend container
+    reverse_proxy frontend:3000
+}
+
+api.100xai.co {
+    # Proxy all traffic to the FastAPI backend container
+    reverse_proxy api:8000
+}
