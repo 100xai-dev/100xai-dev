@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.frontend
+      args:
+        # Baked into the Next bundle at build time (the BFF proxy reads it
+        # server-side). Runtime env alone is ignored because Next inlines it.
+        BACKEND_URL: http://api:8000
     environment:
       # The Next BFF proxy (app/api/[...path]/route.ts) forwards server-side from
       # inside this container, so it must reach the backend over the internal

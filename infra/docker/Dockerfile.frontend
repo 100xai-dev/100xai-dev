@@ -6,6 +6,12 @@ WORKDIR /app
 ARG NEXT_PUBLIC_DEMO_MODE=false
 ENV NEXT_PUBLIC_DEMO_MODE=$NEXT_PUBLIC_DEMO_MODE
 
+# Backend URL the server-side BFF proxy forwards to. Next folds this into the
+# bundle at build time, so it MUST be present here (runtime env alone is ignored).
+# Use the internal Docker service address — the proxy runs inside the container.
+ARG BACKEND_URL=http://api:8000
+ENV BACKEND_URL=$BACKEND_URL
+
 # Install dependencies for Next.js build
 RUN apk add --no-cache libc6-compat
 
