@@ -126,3 +126,44 @@ def test_enforce_plan_limit_blocks_over_quota(db_session):
     with pytest.raises(HTTPException) as exc:
         enforce_plan_limit(db_session, user.org_id, RESOURCE_BRANDS)
     assert exc.value.status_code == 402
+
+
+def test_create_brand_requires_active_subscription(client, db_session):
+    """A free (unpaid) org cannot create a brand / trigger a crawl."""
+    user = create_user(db_session, "gated@example.com")  # defaults to free plan
+    res = client.post(
+        "/v1/brands",
+        headers=auth_headers(user),
+        json={"name": "Gated Brand", "dna_source": "manual"},
+    )
+    assert res.status_code == 402
+    assert res.json()["detail"]["code"] == "subscription_required"
+
+
+def test_paid_org_can_create_brand(client, db_session):
+    """An org on a paid plan passes the subscription gate."""
+    user = create_user(db_session, "paid@example.com", plan_code="pro")
+    res = client.post(
+        "/v1/brands",
+        headers=auth_headers(user),
+        json={"name": "Paid Brand", "dna_source": "manual"},
+    )
+    assert res.status_code == 201
+
+
+def test_has_active_subscription_reflects_subscription_row(db_session):
+    """A free-plan org with an active subscription row still counts as paid."""
+    from app.models.billing import Subscription
+
+    user = create_user(db_session, "sub_row@example.com")  # plan_code stays free
+    assert billing.has_active_subscription(db_session, user.org_id) is False
+
+    db_session.add(Subscription(
+        id=uuid_str(),
+        org_id=user.org_id,
+        plan_code="pro",
+        razorpay_subscription_id="sub_active1",
+        status="active",
+    ))
+    db_session.commit()
+    assert billing.has_active_subscription(db_session, user.org_id) is True

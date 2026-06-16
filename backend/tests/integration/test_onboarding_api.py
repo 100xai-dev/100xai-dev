@@ -11,7 +11,7 @@ def test_create_crawl_brand_persists_brand_and_onboard_job(
 ) -> None:
     from tests.conftest import auth_headers, create_user
 
-    user = create_user(db_session, "admin@example.com")
+    user = create_user(db_session, "admin@example.com", plan_code="pro")
 
     response = client.post(
         "/v1/brands",
@@ -46,7 +46,7 @@ def test_create_manual_brand_does_not_create_onboard_job(
 ) -> None:
     from tests.conftest import auth_headers, create_user
 
-    user = create_user(db_session, "team@example.com", role="team_member")
+    user = create_user(db_session, "team@example.com", role="team_member", plan_code="pro")
 
     response = client.post(
         "/v1/brands",
@@ -64,8 +64,8 @@ def test_create_manual_brand_does_not_create_onboard_job(
 def test_list_brands_is_tenant_scoped(client: TestClient, db_session: Session) -> None:
     from tests.conftest import auth_headers, create_user
 
-    first = create_user(db_session, "first@example.com")
-    second = create_user(db_session, "second@example.com")
+    first = create_user(db_session, "first@example.com", plan_code="pro")
+    second = create_user(db_session, "second@example.com", plan_code="pro")
 
     client.post(
         "/v1/brands",
@@ -87,7 +87,7 @@ def test_list_brands_is_tenant_scoped(client: TestClient, db_session: Session) -
 def test_approve_locks_pending_review_profile(client: TestClient, db_session: Session) -> None:
     from tests.conftest import auth_headers, create_user
 
-    user = create_user(db_session, "approver@example.com")
+    user = create_user(db_session, "approver@example.com", plan_code="pro")
     create_response = client.post(
         "/v1/brands",
         headers=auth_headers(user),

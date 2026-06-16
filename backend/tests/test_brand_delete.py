@@ -6,7 +6,7 @@ from tests.conftest import FakeQueue, auth_headers, create_user
 
 
 def create_manual_brand(client: TestClient, db_session: Session) -> tuple[Brand, dict[str, str]]:
-    user = create_user(db_session, "delete-brand@example.com")
+    user = create_user(db_session, "delete-brand@example.com", plan_code="pro")
     headers = auth_headers(user)
     response = client.post(
         "/v1/brands",

@@ -24,6 +24,8 @@ export default function BrandsLayout({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav-links">
           <Link href="/brands">Brands</Link>
+          <Link href="/billing">Billing</Link>
+          <Link href="/profile">Profile</Link>
           <LogoutButton />
         </nav>
       </header>

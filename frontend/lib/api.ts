@@ -52,6 +52,24 @@ type RequestOptions = {
   cache?: RequestCache;
 };
 
+/**
+ * Error thrown by {@link apiRequest} that preserves the HTTP status and any
+ * machine-readable `code` from the backend's `{detail: {code, message}}` body
+ * (e.g. `subscription_required`, `plan_limit_reached`), so callers can branch
+ * on it instead of string-matching the message.
+ */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 function isServer(): boolean {
   return typeof window === "undefined";
 }
@@ -80,15 +98,20 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
   });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
+    let code: string | undefined;
     try {
       const payload = (await response.json()) as { detail?: unknown };
-      if (payload.detail) {
-        detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      if (payload.detail && typeof payload.detail === "string") {
+        detail = payload.detail;
+      } else if (payload.detail && typeof payload.detail === "object") {
+        const obj = payload.detail as { code?: string; message?: string };
+        code = obj.code;
+        detail = obj.message ?? JSON.stringify(payload.detail);
       }
     } catch {
       // no-op fallback to status text
     }
-    throw new Error(detail);
+    throw new ApiError(detail, response.status, code);
   }
   // 204 No Content (logout) — nothing to parse.
   if (response.status === 204) {

@@ -81,8 +81,8 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-def create_user(session: Session, email: str, role: str = "admin") -> User:
-    org = Organization(name=f"Org for {email}")
+def create_user(session: Session, email: str, role: str = "admin", plan_code: str = "free") -> User:
+    org = Organization(name=f"Org for {email}", plan_code=plan_code)
     session.add(org)
     session.flush()
     user = User(email=email, password_hash="test", name=email, role=role, org_id=org.id)

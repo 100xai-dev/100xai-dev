@@ -11,7 +11,7 @@ def test_crawl_path_enqueues_onboarding_job(
     db_session: Session,
     fake_queues: dict[str, FakeQueue],
 ) -> None:
-    user = create_user(db_session, "queue-crawl@example.com")
+    user = create_user(db_session, "queue-crawl@example.com", plan_code="pro")
 
     response = client.post(
         "/v1/brands",
@@ -39,7 +39,7 @@ def test_manual_path_does_not_enqueue(
     db_session: Session,
     fake_queues: dict[str, FakeQueue],
 ) -> None:
-    user = create_user(db_session, "queue-manual@example.com")
+    user = create_user(db_session, "queue-manual@example.com", plan_code="pro")
 
     response = client.post(
         "/v1/brands",
@@ -84,7 +84,7 @@ def test_enqueue_failure_does_not_lose_job_row(
     db_session: Session,
     monkeypatch,
 ) -> None:
-    user = create_user(db_session, "queue-failure@example.com")
+    user = create_user(db_session, "queue-failure@example.com", plan_code="pro")
 
     def boom(self, *, job_id: str, brand_id: str) -> None:
         raise RuntimeError("redis down")

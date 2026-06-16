@@ -1,15 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createBrand } from "@/lib/api";
+import { ApiError, createBrand } from "@/lib/api";
 import type { DnaSource } from "@/lib/types";
 
 export function CreateBrandForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>("");
+  const [paywall, setPaywall] = useState(false);
   const [dnaSource, setDnaSource] = useState<DnaSource>("crawl");
 
   async function onSubmit(formData: FormData) {
@@ -22,12 +24,17 @@ export function CreateBrandForm() {
 
     setPending(true);
     setError("");
+    setPaywall(false);
     try {
       const response = await createBrand({ name, website_url: website_url || undefined, dna_source });
       router.push(`/brands/${response.brand_id}/onboarding`);
       router.refresh();
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Failed to create brand");
+      if (submitError instanceof ApiError && submitError.code === "subscription_required") {
+        setPaywall(true);
+      } else {
+        setError(submitError instanceof Error ? submitError.message : "Failed to create brand");
+      }
     } finally {
       setPending(false);
     }
@@ -101,6 +108,18 @@ export function CreateBrandForm() {
             ))}
           </div>
         </div>
+
+        {paywall && (
+          <div className="alert alert-danger" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <span>
+              An active subscription is required before we can crawl your website and generate content.
+              Choose a plan to get started.
+            </span>
+            <Link href="/billing" className="btn btn-red" style={{ alignSelf: "flex-start" }}>
+              View plans &amp; subscribe
+            </Link>
+          </div>
+        )}
 
         {error && (
           <div className="alert alert-danger">{error}</div>

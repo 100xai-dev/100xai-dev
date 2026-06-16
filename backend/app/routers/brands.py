@@ -17,7 +17,7 @@ from app.schemas.brand import (
 from app.schemas.brand_profile import BrandProfileContent, BrandProfileFull, BrandProfilePatch
 from app.schemas.keyword import KeywordListResponse, KeywordOut, KeywordResearchRequest, KeywordResearchResponse, KeywordStatsResponse
 from app.services.brand_service import approve_brand, create_brand, delete_brand_immediately, patch_profile, submit_manual_profile
-from app.services.billing import enforce_plan_limit
+from app.services.billing import enforce_plan_limit, require_active_subscription
 from app.services.billing_plans import RESOURCE_BRANDS
 
 router = APIRouter(prefix="/brands", tags=["brands"])
@@ -30,6 +30,7 @@ def create_brand_endpoint(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> BrandCreateResponse:
     require_role(current_user.role, {"admin", "team_member"})
+    require_active_subscription(db, current_user.org_id)
     enforce_plan_limit(db, current_user.org_id, RESOURCE_BRANDS)
     brand, job = create_brand(db, payload, current_user)
     return BrandCreateResponse(
@@ -286,12 +287,13 @@ def start_keyword_research(
 ) -> KeywordResearchResponse:
     """Start keyword research for a brand."""
     require_role(current_user.role, {"admin", "team_member"})
-    
+    require_active_subscription(db, current_user.org_id)
+
     # Verify brand exists and user has access
     brand = get_brand(db, brand_id, current_user.org_id)
     if not brand:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-    
+
     # Get brand profile for context
     brand_profile = db.query(BrandProfile).filter(BrandProfile.brand_id == brand_id).first()
     brand_context = ""
@@ -474,12 +476,13 @@ def start_serp_analysis(
 ):
     """Start SERP analysis for a brand's keywords."""
     require_role(current_user.role, {"admin", "team_member"})
-    
+    require_active_subscription(db, current_user.org_id)
+
     # Verify brand exists and user has access
     brand = get_brand(db, brand_id, current_user.org_id)
     if not brand:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-    
+
     # Get target keywords - only keywords that don't already have SERP analysis
     from app.models.serp_analysis import SerpAnalysis
     

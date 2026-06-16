@@ -50,6 +50,40 @@ def get_org_subscription(db: Session, org_id: str) -> Subscription | None:
     )
 
 
+def has_active_subscription(db: Session, org_id: str) -> bool:
+    """True when the org currently has an active *paid* subscription.
+
+    The webhook promotes ``org.plan_code`` to the paid tier while a subscription
+    is active and reverts it to free otherwise, so that is the primary signal.
+    We also check the latest subscription row directly as a fallback for the
+    window between checkout and the webhook landing.
+    """
+    org = db.get(Organization, org_id)
+    if org and org.plan_code != DEFAULT_PLAN_CODE:
+        return True
+    sub = get_org_subscription(db, org_id)
+    return bool(sub and sub.status in ACTIVE_STATES and sub.plan_code != DEFAULT_PLAN_CODE)
+
+
+def require_active_subscription(db: Session, org_id: str) -> None:
+    """Raise 402 unless the org has an active paid subscription.
+
+    Gates crawling and all content-generation features behind payment: a brand
+    new (free) org must subscribe before it can crawl or generate.
+    """
+    if not has_active_subscription(db, org_id):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "subscription_required",
+                "message": (
+                    "An active subscription is required to use this feature. "
+                    "Please subscribe to a plan to continue."
+                ),
+            },
+        )
+
+
 def create_subscription(db: Session, org: Organization, plan_code: str) -> dict:
     """Create a Razorpay subscription for the org and persist a pending row.
 
