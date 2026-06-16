@@ -666,7 +666,8 @@ Write engaging, scannable content that:
 
 CRITICAL: Stop writing when you've covered the essential points. Better to be concise than comprehensive.
 
-Return clean HTML using <h2>,<h3>,<p>,<strong>,<ul>,<ol>,<a> tags. No meta-commentary."""
+Do NOT include the section heading/title in your output — it is added automatically. Start directly with the body content.
+Return clean HTML using <h3>,<p>,<strong>,<ul>,<ol>,<a> tags only (no <h2>; use <h3> for any sub-headings within the section). No meta-commentary."""
         
         llm = LLMService()
         html_content = await llm.call(
@@ -1208,6 +1209,26 @@ def validate_link_density(content: str, max_density: float = 0.03) -> bool:
     
     return is_valid
 
+def _strip_leading_heading(content: str, heading: str) -> str:
+    """Drop a leading <h1>-<h3> if the model echoed the section title into its body.
+
+    The assembler always prepends the outline heading (see below), so a heading the
+    LLM emitted at the top of the body would render twice. We only strip the FIRST
+    leading heading tag, and only when its text matches the section heading (after
+    normalizing whitespace/case) so we never eat a legitimate in-body sub-heading.
+    """
+    if not content:
+        return content
+
+    def _norm(text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text)).strip().lower()
+
+    match = re.match(r"\s*<(h[1-3])\b[^>]*>(.*?)</\1>\s*", content, flags=re.IGNORECASE | re.DOTALL)
+    if match and _norm(match.group(2)) == _norm(heading):
+        return content[match.end():]
+    return content
+
+
 def merge_content_by_position(
     introduction: str,
     table_of_contents: str,
@@ -1217,16 +1238,17 @@ def merge_content_by_position(
     faq_section: str = None
 ) -> AssembledContent:
     """Merge (intro · TOC · conclusion) by position"""
-    
+
     # Sort sections by index
     sorted_sections = sorted(body_sections, key=lambda s: s.index)
-    
+
     # Build section HTML
     sections_html = []
     for section in sorted_sections:
+        body = _strip_leading_heading(section.content, section.heading)
         section_html = f"""
         <{section.heading_type} id="section-{section.index + 1}">{section.heading}</{section.heading_type}>
-        {section.content}
+        {body}
         """
         sections_html.append(section_html.strip())
     
