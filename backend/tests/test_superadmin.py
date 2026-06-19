@@ -159,3 +159,38 @@ def test_reset_password_issues_token(db_session, monkeypatch):
     from app.models import EmailVerificationToken
     assert db_session.query(EmailVerificationToken).filter_by(user_id=owner.id).count() == 1
     assert len(sent) == 1
+
+
+def test_routes_require_superadmin(client, db_session):
+    normal = create_user(db_session, "normal@acme.test", role="admin")
+    res = client.get("/v1/superadmin/orgs", headers=auth_headers(normal))
+    assert res.status_code == 403
+
+
+def test_superadmin_lists_and_creates_orgs(client, db_session, monkeypatch):
+    import app.services.superadmin as svc
+    monkeypatch.setattr(svc, "send_verification_email", lambda email, token: None)
+
+    root = create_user(db_session, "root3@platform.test", role="superadmin")
+    headers = auth_headers(root)
+
+    res = client.get("/v1/superadmin/orgs", headers=headers)
+    assert res.status_code == 200
+    assert any(o["id"] == root.org_id for o in res.json()["items"])
+
+    res = client.post("/v1/superadmin/orgs", headers=headers, json={
+        "organization_name": "ApiCo", "plan_code": "free",
+        "admin_name": "Cara", "admin_email": "cara@example.com",
+    })
+    assert res.status_code == 201
+    body = res.json()
+    assert body["org_id"] and body["admin_user_id"]
+
+
+def test_superadmin_enter_org_audits(client, db_session):
+    root = create_user(db_session, "root4@platform.test", role="superadmin")
+    target = create_user(db_session, "t@acme.test", role="admin")
+    res = client.post(f"/v1/superadmin/orgs/{target.org_id}/enter", headers=auth_headers(root))
+    assert res.status_code == 200
+    from app.models import AuditLog
+    assert db_session.query(AuditLog).filter_by(org_id=target.org_id, action="superadmin.org.entered").count() == 1

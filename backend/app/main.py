@@ -14,6 +14,7 @@ from app.routers.schedules import router as schedules_router
 from app.routers.publishing import router as publishing_router
 from app.routers.billing import router as billing_router
 from app.routers.persona import router as persona_router
+from app.routers.superadmin import router as superadmin_router
 from app.config import get_settings as _get_settings
 
 _settings = _get_settings()
@@ -72,3 +73,4 @@ app.include_router(schedules_router)
 app.include_router(publishing_router, prefix="/v1")
 app.include_router(billing_router, prefix="/v1")
 app.include_router(persona_router, prefix="/v1")
+app.include_router(superadmin_router, prefix="/v1")
