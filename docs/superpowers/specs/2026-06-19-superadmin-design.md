@@ -100,7 +100,11 @@ Guarded by a `require_superadmin` dependency (rejects any non-superadmin with
   (`backend/app/routers/auth.py:47`) and `send_verification_email`.
 - `PATCH /superadmin/orgs/{id}` — edit `name` and/or `plan_code`.
 - `POST /superadmin/orgs/{id}/suspend` and `POST /superadmin/orgs/{id}/unsuspend`.
-- `DELETE /superadmin/orgs/{id}` — delete the org and its data (cascade).
+- `DELETE /superadmin/orgs/{id}` — **soft-delete** the org (set `status="deleted"`;
+  hidden from lists, login blocked, reversible). A hard purge is intentionally
+  deferred: a true cascade is blocked by RESTRICT FKs on the scheduling tables
+  and would orphan vector-store namespaces (see Architecture Review risk #2 /
+  scorecard item 15), so it belongs in a dedicated background job, not here.
 - `GET /superadmin/orgs/{id}/users` — list users in the org.
 - `POST /superadmin/orgs/{id}/users` — create a user (role selectable).
 - `PATCH /superadmin/orgs/{id}/users/{user_id}` — change role / disable / re-enable.
@@ -112,10 +116,11 @@ Guarded by a `require_superadmin` dependency (rejects any non-superadmin with
 
 ### 4.4 Suspend support (schema)
 
-- Add `organizations.status` (`active` | `suspended`, default `active`) via an
-  Alembic migration.
+- Add `organizations.status` (`active` | `suspended` | `deleted`, default
+  `active`) via an Alembic migration.
 - Login (`/auth/login`) and token refresh (`/auth/refresh`) reject users whose
-  org is `suspended` (clear, machine-readable error code).
+  org is not `active` (machine-readable error code `org_<status>`, e.g.
+  `org_suspended` / `org_deleted`).
 - A superadmin acting-as **can** still enter a suspended org to inspect/fix it
   (the acting-org path does not apply the suspend gate).
 
@@ -183,5 +188,5 @@ Guarded by a `require_superadmin` dependency (rejects any non-superadmin with
 - Multi-org membership for normal users.
 - Impersonating a *specific* user within an org (superadmin acts as org admin,
   not as a named end-user).
-- Soft-delete / recoverability of deleted orgs (delete is a hard cascade,
-  matching current brand-delete behavior).
+- **Hard purge** of a deleted org's rows and vector-store namespaces — deferred
+  to a future dedicated background job; `DELETE` is a reversible soft-delete.
