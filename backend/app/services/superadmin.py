@@ -1,15 +1,12 @@
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import (
     Brand,
-    EmailVerificationToken,
     Organization,
     User,
 )
@@ -23,6 +20,7 @@ from app.schemas.superadmin import (
 from app.services.audit import write_audit
 from app.services.billing_plans import PLANS
 from app.services.email import send_verification_email
+from app.services.verification import issue_verification_token
 
 
 def _require_org(db: Session, org_id: str) -> Organization:
@@ -67,7 +65,7 @@ def create_organization(db: Session, payload: CreateOrgRequest, actor_user_id: s
     db.add(org)
     db.flush()
 
-    # No usable password yet — the admin sets one via the verification/invite flow.
+    # Not a usable password: this value is never verified — the admin sets a real password via the invite/verification flow.
     placeholder_hash = hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest()
     admin = User(
         id=uuid_str(),
@@ -81,14 +79,7 @@ def create_organization(db: Session, payload: CreateOrgRequest, actor_user_id: s
     db.add(admin)
     db.flush()
 
-    settings = get_settings()
-    raw_token = secrets.token_urlsafe(32)
-    db.add(EmailVerificationToken(
-        id=uuid_str(),
-        user_id=admin.id,
-        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=settings.email_verification_expiry_hours),
-    ))
+    raw_token = issue_verification_token(db, admin.id)
 
     write_audit(
         db, org_id=org.id, user_id=actor_user_id, action="superadmin.org.created",
@@ -112,7 +103,7 @@ def update_organization(db: Session, org_id: str, payload: UpdateOrgRequest, act
     write_audit(
         db, org_id=org.id, user_id=actor_user_id, action="superadmin.org.updated",
         resource_type="organization", resource_id=org.id,
-        metadata={"name": payload.name, "plan_code": payload.plan_code},
+        metadata={"name": org.name, "plan_code": org.plan_code},
     )
     db.commit()
     db.refresh(org)

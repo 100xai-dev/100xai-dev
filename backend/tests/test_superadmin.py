@@ -1,5 +1,5 @@
 from app.auth.password import hash_password
-from app.models import Organization, User
+from app.models import AuditLog, Brand, Organization, User
 from app.models.base import uuid_str
 from tests.conftest import auth_headers, create_user
 
@@ -49,9 +49,6 @@ def test_login_succeeds_when_active(client, db_session):
     res = client.post("/v1/auth/login", json={"email": "ok@example.com", "password": "Test1234!"})
     assert res.status_code == 200
     assert "access_token" in res.json()
-
-
-from app.models import AuditLog, Brand
 
 
 def test_list_organizations_returns_counts(db_session):
@@ -110,3 +107,12 @@ def test_delete_organization_soft_deletes_and_hides(db_session):
     assert org is not None and org.status == "deleted"
     # Soft-deleted orgs are hidden from the superadmin list.
     assert all(i.id != org_id for i in list_organizations(db_session))
+
+
+def test_record_org_entry_audits(db_session):
+    from app.services.superadmin import record_org_entry
+    from app.models import AuditLog
+    from tests.conftest import create_user
+    u = create_user(db_session, "enter@example.com", role="admin")
+    record_org_entry(db_session, u.org_id, actor_user_id="root")
+    assert db_session.query(AuditLog).filter_by(org_id=u.org_id, action="superadmin.org.entered").count() == 1
