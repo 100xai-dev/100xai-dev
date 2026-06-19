@@ -215,9 +215,22 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
             detail={"code": "email_not_verified", "email": user.email},
         )
 
+    if user.disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "account_disabled", "email": user.email},
+        )
+
     org = db.get(Organization, user.org_id)
     if not org:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Organization not found")
+
+    if org.status != "active":
+        # Covers both "suspended" and soft-"deleted" orgs.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": f"org_{org.status}"},
+        )
 
     return _build_auth_response(user, org, db)
 
@@ -243,6 +256,18 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> AccessTok
     user = db.get(User, claims["sub"])
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    if user.disabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "account_disabled"},
+        )
+    org = db.get(Organization, user.org_id)
+    if org is not None and org.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": f"org_{org.status}"},
+        )
 
     new_access = create_access_token(user.id, user.org_id, user.role)
 
