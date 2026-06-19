@@ -82,8 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       throw new Error(typeof err.detail === "string" ? err.detail : "Login failed");
     }
-    applySession(await res.json() as AuthResponse);
-    router.push("/brands");
+    const data = await res.json() as AuthResponse;
+    applySession(data);
+    router.push(data.user.role === "superadmin" ? "/superadmin" : "/brands");
     // Invalidate the Next.js Router Cache so server components (e.g. /brands)
     // re-render with the new session instead of replaying the prior user's RSC.
     router.refresh();
