@@ -21,6 +21,9 @@ class CurrentUser:
 def get_current_user(
     authorization: str | None = Header(default=None),
     x_acting_org_id: str | None = Header(default=None),
+    # FastAPI caches get_db per request, so routes that already depend on
+    # get_db do not open a second session. The org lookup below only runs
+    # for superadmins that supply an X-Acting-Org-Id header.
     db: Session = Depends(get_db),
 ) -> CurrentUser:
     if not authorization or not authorization.startswith("Bearer "):
