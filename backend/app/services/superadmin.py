@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Brand,
+    EmailVerificationToken,
     Organization,
     User,
 )
@@ -14,8 +15,10 @@ from app.models.base import uuid_str
 from app.schemas.superadmin import (
     CreateOrgRequest,
     CreateOrgResponse,
+    CreateOrgUserRequest,
     OrgListItem,
     UpdateOrgRequest,
+    UpdateOrgUserRequest,
 )
 from app.services.audit import write_audit
 from app.services.billing_plans import PLANS
@@ -149,3 +152,92 @@ def record_org_entry(db: Session, org_id: str, actor_user_id: str) -> None:
         resource_type="organization", resource_id=org_id, metadata={},
     )
     db.commit()
+
+
+_VALID_ROLES = {"viewer", "team_member", "admin"}
+
+
+def _require_user_in_org(db: Session, org_id: str, user_id: str) -> User:
+    user = db.query(User).filter(User.id == user_id, User.org_id == org_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    return user
+
+
+def list_org_users(db: Session, org_id: str) -> list[User]:
+    _require_org(db, org_id)
+    return db.query(User).filter(User.org_id == org_id).order_by(User.email).all()
+
+
+def create_org_user(db: Session, org_id: str, payload: CreateOrgUserRequest, actor_user_id: str) -> User:
+    _require_org(db, org_id)
+    if payload.role not in _VALID_ROLES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid role")
+    email = payload.email.lower().strip()
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    placeholder_hash = hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest()
+    user = User(
+        id=uuid_str(), org_id=org_id, email=email, password_hash=placeholder_hash,
+        name=payload.name.strip(), role=payload.role, email_verified=False,
+    )
+    db.add(user)
+    db.flush()
+
+    raw_token = issue_verification_token(db, user.id)
+    write_audit(
+        db, org_id=org_id, user_id=actor_user_id, action="superadmin.user.created",
+        resource_type="user", resource_id=user.id, metadata={"email": email, "role": payload.role},
+    )
+    db.commit()
+    send_verification_email(email, raw_token)
+    db.refresh(user)
+    return user
+
+
+def update_org_user(db: Session, org_id: str, user_id: str, payload: UpdateOrgUserRequest, actor_user_id: str) -> User:
+    user = _require_user_in_org(db, org_id, user_id)
+    if payload.role is not None:
+        if payload.role not in _VALID_ROLES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid role")
+        user.role = payload.role
+    if payload.disabled is not None:
+        user.disabled = payload.disabled
+    write_audit(
+        db, org_id=org_id, user_id=actor_user_id, action="superadmin.user.updated",
+        resource_type="user", resource_id=user.id,
+        metadata={"role": payload.role, "disabled": payload.disabled},
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_org_user(db: Session, org_id: str, user_id: str, actor_user_id: str) -> None:
+    user = _require_user_in_org(db, org_id, user_id)
+    write_audit(
+        db, org_id=org_id, user_id=actor_user_id, action="superadmin.user.deleted",
+        resource_type="user", resource_id=user.id, metadata={"email": user.email},
+    )
+    db.flush()
+    db.delete(user)
+    db.commit()
+
+
+def reset_user_password(db: Session, org_id: str, user_id: str, actor_user_id: str) -> None:
+    user = _require_user_in_org(db, org_id, user_id)
+    # Invalidate the password and any outstanding verification tokens.
+    user.password_hash = hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used == False,  # noqa: E712
+    ).update({"used": True})
+    # Issue a fresh set-password token via the shared helper.
+    raw_token = issue_verification_token(db, user.id)
+    write_audit(
+        db, org_id=org_id, user_id=actor_user_id, action="superadmin.user.password_reset",
+        resource_type="user", resource_id=user.id, metadata={},
+    )
+    db.commit()
+    send_verification_email(user.email, raw_token)

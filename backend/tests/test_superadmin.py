@@ -116,3 +116,46 @@ def test_record_org_entry_audits(db_session):
     u = create_user(db_session, "enter@example.com", role="admin")
     record_org_entry(db_session, u.org_id, actor_user_id="root")
     assert db_session.query(AuditLog).filter_by(org_id=u.org_id, action="superadmin.org.entered").count() == 1
+
+
+def test_create_and_update_org_user(db_session):
+    import app.services.superadmin as svc
+    from app.schemas.superadmin import CreateOrgUserRequest, UpdateOrgUserRequest
+
+    owner = create_user(db_session, "owner2@acme.test", role="admin")
+    new_user = svc.create_org_user(
+        db_session, owner.org_id,
+        CreateOrgUserRequest(name="Bob", email="bob@example.com", role="team_member"),
+        actor_user_id="root",
+    )
+    assert new_user.role == "team_member" and new_user.org_id == owner.org_id
+
+    updated = svc.update_org_user(
+        db_session, owner.org_id, new_user.id,
+        UpdateOrgUserRequest(disabled=True, role="viewer"), actor_user_id="root",
+    )
+    assert updated.disabled is True and updated.role == "viewer"
+
+
+def test_update_user_rejects_cross_org(db_session):
+    import app.services.superadmin as svc
+    from app.schemas.superadmin import UpdateOrgUserRequest
+    from fastapi import HTTPException
+    import pytest
+
+    org_a = create_user(db_session, "a@x.test", role="admin")
+    org_b = create_user(db_session, "b@y.test", role="admin")
+    with pytest.raises(HTTPException) as exc:
+        svc.update_org_user(db_session, org_a.org_id, org_b.id, UpdateOrgUserRequest(role="viewer"), actor_user_id="root")
+    assert exc.value.status_code == 404
+
+
+def test_reset_password_issues_token(db_session, monkeypatch):
+    import app.services.superadmin as svc
+    sent = []
+    monkeypatch.setattr(svc, "send_verification_email", lambda email, token: sent.append((email, token)))
+    owner = create_user(db_session, "reset@acme.test", role="admin")
+    svc.reset_user_password(db_session, owner.org_id, owner.id, actor_user_id="root")
+    from app.models import EmailVerificationToken
+    assert db_session.query(EmailVerificationToken).filter_by(user_id=owner.id).count() == 1
+    assert len(sent) == 1
