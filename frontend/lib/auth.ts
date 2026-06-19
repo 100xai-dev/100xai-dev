@@ -20,6 +20,7 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(ORG_KEY);
   document.cookie = `${ACCESS_TOKEN_KEY}=; path=/; max-age=0`;
+  document.cookie = `100xai_acting_org=; path=/; max-age=0`;
 }
 
 export function getAccessToken(): string | null {
@@ -81,4 +82,26 @@ export async function getValidAccessToken(): Promise<string | null> {
     return refreshAccessToken();
   }
   return token;
+}
+
+const ACTING_ORG_KEY = "100xai_acting_org";
+const ACTING_ORG_NAME_KEY = "100xai_acting_org_name";
+
+export function setActingOrg(orgId: string, orgName: string): void {
+  document.cookie = `${ACTING_ORG_KEY}=${orgId}; path=/; max-age=86400; SameSite=Lax`;
+  localStorage.setItem(ACTING_ORG_NAME_KEY, orgName);
+}
+
+export function clearActingOrg(): void {
+  document.cookie = `${ACTING_ORG_KEY}=; path=/; max-age=0`;
+  localStorage.removeItem(ACTING_ORG_NAME_KEY);
+}
+
+export function getActingOrgId(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)100xai_acting_org=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function getActingOrgName(): string | null {
+  return typeof window === "undefined" ? null : localStorage.getItem(ACTING_ORG_NAME_KEY);
 }

@@ -608,3 +608,60 @@ export interface PublishingStatsResponse {
     published_urls: Record<string, string>;
   }>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Superadmin — backend/app/schemas/superadmin.py
+// ─────────────────────────────────────────────────────────────────────────────
+export interface OrgListItem {
+  id: string;
+  name: string;
+  plan_code: string;
+  status: string;
+  user_count: number;
+  brand_count: number;
+}
+
+export interface OrgListResponse {
+  items: OrgListItem[];
+}
+
+export interface CreateOrgRequest {
+  organization_name: string;
+  plan_code: string;
+  admin_name: string;
+  admin_email: string;
+}
+
+export interface CreateOrgResponse {
+  org_id: string;
+  admin_user_id: string;
+}
+
+export interface UpdateOrgRequest {
+  name?: string;
+  plan_code?: string;
+}
+
+export interface OrgUserOut {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string;
+  email_verified: boolean;
+  disabled: boolean;
+}
+
+export interface OrgUserListResponse {
+  items: OrgUserOut[];
+}
+
+export interface CreateOrgUserRequest {
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface UpdateOrgUserRequest {
+  role?: string;
+  disabled?: boolean;
+}
