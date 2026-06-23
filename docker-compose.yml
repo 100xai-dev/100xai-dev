@@ -22,10 +22,14 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      # Use node instead of `wget --spider`: the Next root often answers with a
+      # 3xx redirect (e.g. to /login), which busybox wget treats as failure and
+      # left the container "unhealthy". Treat any status < 400 as healthy.
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   api:
     build:
@@ -84,7 +88,11 @@ services:
     healthcheck:
       # rq info exits non-zero if it cannot reach Redis or the worker has no
       # registered queues — meaningful liveness, unlike a bare `print`.
-      test: ["CMD-SHELL", "rq info -u \"$REDIS_URL\" --only-queues onboarding purge default blog keyword_research serp_analysis content_generation publisher >/dev/null 2>&1"]
+      # NOTE: `$$` (not `$`) so Compose does NOT interpolate the variable at parse
+      # time. A single `$REDIS_URL` is substituted to an empty string by Compose
+      # (it's only defined in the container env, not the host), which made the
+      # check run `rq info -u ""` and the worker report unhealthy forever.
+      test: ["CMD-SHELL", "rq info -u \"$$REDIS_URL\" --only-queues onboarding purge default blog keyword_research serp_analysis content_generation publisher >/dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -96,7 +104,11 @@ services:
       POSTGRES_PASSWORD: 100xai
       POSTGRES_DB: 100xai
     ports:
-      - "5432:5432"
+      # Bind to loopback only. api/worker reach Postgres over the internal Docker
+      # network by service name, so the DB never needs a public port. Exposing
+      # 0.0.0.0:5432 invites internet brute-force scans against the default
+      # `postgres` superuser (see fatal auth-failure log spam).
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -108,7 +120,9 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      # Loopback only — Redis here has NO password, so a public 0.0.0.0:6379 is a
+      # remote-code-execution risk. api/worker reach it via the internal network.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
