@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # --- Terms & Conditions ---
     current_terms_version: str = "2026-06-09"
 
+    # --- Superadmin provisioning ---
+    superadmin_emails: str = ""  # comma-separated list of platform superadmin emails
+    superadmin_password: str | None = None  # optional shared bootstrap password
+
     # --- WordPress.com OAuth (alternative to self-hosted Application Passwords) ---
     wpcom_client_id: str | None = None
     wpcom_client_secret: str | None = None

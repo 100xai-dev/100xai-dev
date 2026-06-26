@@ -3,6 +3,7 @@ import { Fraunces, Montserrat, JetBrains_Mono, Cormorant_Garamond, Inter } from 
 
 import { AuthProvider } from "@/context/AuthContext";
 import { TermsGuard } from "@/components/TermsGuard";
+import { ActingBanner } from "@/components/superadmin/acting-banner";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     >
       <body>
         <AuthProvider>
+          <ActingBanner />
           {children}
           <TermsGuard />
         </AuthProvider>

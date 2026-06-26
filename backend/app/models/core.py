@@ -13,6 +13,7 @@ class Organization(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
     name: Mapped[str] = mapped_column(String, nullable=False)
     plan_code: Mapped[str] = mapped_column(String, nullable=False, default="free")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
 
     users: Mapped[list["User"]] = relationship(back_populates="organization")
 
@@ -30,6 +31,7 @@ class User(Base, TimestampMixin):
 
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     terms_version_accepted: Mapped[str | None] = mapped_column(String)
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

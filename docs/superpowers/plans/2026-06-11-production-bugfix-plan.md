@@ -23,16 +23,15 @@
 
 | # | Severity | Area | Bug | Task |
 |---|----------|------|-----|------|
-| 1 | CRITICAL | secrets | DataForSEO login+password hardcoded in tracked `test_dataforseo_auth.py` | T1 |
-| 2 | CRITICAL | secrets | WordPress admin app-password hardcoded in tracked `test_wordpress_connection.py` + SQL | T1 |
-| 3 | CRITICAL | infra | No `.dockerignore`; `COPY backend` bakes `.env` (live API keys) + venv + ops scripts into images | T2 |
+
 | 4 | CRITICAL | auth | JWT secret defaults to public string `dev-secret-change-me-...`, no prod guard; live `.env` uses it | T3 |
-| 5 | CRITICAL | frontend | LLM-generated blog HTML rendered via `dangerouslySetInnerHTML` (stored XSS) | T9 |
+| 5 | CRITICAL | frontend | LLM-generated blog HTML rendered via `dangerouslySetInnerHTML` (stored XSS) | T9 |                                
 | 6 | CRITICAL | backend | SSRF in brand crawler — fetches user URL with no private-IP block, follows redirects | T6 |
 | 7 | HIGH | infra | docker-compose exposes Postgres/Redis(no-auth)/MinIO on all interfaces with default creds | T4 |
 | 8 | HIGH | runtime | `func.case([...])` (SQLAlchemy-1.x list form) → 4 publishing endpoints 500 | T5 |
 | 9 | HIGH | runtime | `logger` used but never imported in `brands.py` → `NameError` masks SERP errors | T5 |
-| 10 | HIGH | worker | `publish_approved_schedule` not idempotent → double-publish on RQ retry | T7 |
+| 10 | HIGH | worker | `publish_approv
+ed_schedule` not idempotent → double-publish on RQ retry | T7 |
 | 11 | HIGH | infra/CI | CI install step fails (flat-layout pkg discovery) → tests never run; alembic cwd bug; missing deps | T8 |
 | 12 | HIGH | frontend | JWT access+refresh tokens in `localStorage`; cookie without `Secure`/`HttpOnly` | T10 |
 | 13 | HIGH | frontend | Hardcoded `http://localhost:8000` fallback in client bundles → prod breakage/mixed-content | T11 |

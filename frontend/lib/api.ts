@@ -44,6 +44,14 @@ import type {
   SignupRequest,
   WordPressSetupRequest,
   WordPressTestRequest,
+  OrgListResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+  UpdateOrgRequest,
+  OrgUserListResponse,
+  OrgUserOut,
+  CreateOrgUserRequest,
+  UpdateOrgUserRequest,
 } from "@/lib/types";
 
 type RequestOptions = {
@@ -88,6 +96,15 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     const token = cookieStore.get("100xai_access_token")?.value;
     if (token) {
       headers.Authorization = `Bearer ${token}`;
+    }
+    const actingOrg = cookieStore.get("100xai_acting_org")?.value;
+    if (actingOrg) {
+      headers["X-Acting-Org-Id"] = actingOrg;
+    }
+  } else {
+    const match = document.cookie.match(/(?:^|;\s*)100xai_acting_org=([^;]+)/);
+    if (match) {
+      headers["X-Acting-Org-Id"] = decodeURIComponent(match[1]);
     }
   }
   const response = await fetch(url, {
@@ -372,4 +389,55 @@ export function deleteSchedule(scheduleId: string): Promise<{ message: string }>
 // ─────────────────────────────────────────────────────────────────────────────
 export function getPublishingStats(brandId: string, days = 30): Promise<PublishingStatsResponse> {
   return apiRequest<PublishingStatsResponse>(`/v1/publishing/stats?brand_id=${brandId}&days=${days}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Superadmin — /v1/superadmin
+// ─────────────────────────────────────────────────────────────────────────────
+export function listOrganizations(): Promise<OrgListResponse> {
+  return apiRequest<OrgListResponse>("/v1/superadmin/orgs");
+}
+
+export function createOrganization(payload: CreateOrgRequest): Promise<CreateOrgResponse> {
+  return apiRequest<CreateOrgResponse>("/v1/superadmin/orgs", { method: "POST", body: payload });
+}
+
+export function updateOrganization(orgId: string, payload: UpdateOrgRequest): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}`, { method: "PATCH", body: payload });
+}
+
+export function suspendOrganization(orgId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}/suspend`, { method: "POST" });
+}
+
+export function unsuspendOrganization(orgId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}/unsuspend`, { method: "POST" });
+}
+
+export function deleteOrganization(orgId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}`, { method: "DELETE" });
+}
+
+export function enterOrganization(orgId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}/enter`, { method: "POST" });
+}
+
+export function listOrgUsers(orgId: string): Promise<OrgUserListResponse> {
+  return apiRequest<OrgUserListResponse>(`/v1/superadmin/orgs/${orgId}/users`);
+}
+
+export function createOrgUser(orgId: string, payload: CreateOrgUserRequest): Promise<OrgUserOut> {
+  return apiRequest<OrgUserOut>(`/v1/superadmin/orgs/${orgId}/users`, { method: "POST", body: payload });
+}
+
+export function updateOrgUser(orgId: string, userId: string, payload: UpdateOrgUserRequest): Promise<OrgUserOut> {
+  return apiRequest<OrgUserOut>(`/v1/superadmin/orgs/${orgId}/users/${userId}`, { method: "PATCH", body: payload });
+}
+
+export function deleteOrgUser(orgId: string, userId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}/users/${userId}`, { method: "DELETE" });
+}
+
+export function resetOrgUserPassword(orgId: string, userId: string): Promise<unknown> {
+  return apiRequest(`/v1/superadmin/orgs/${orgId}/users/${userId}/reset-password`, { method: "POST" });
 }
